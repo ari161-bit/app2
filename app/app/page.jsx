@@ -1,10 +1,10 @@
-import AFAI_FeeKiller from "../../client/components/AFAI_FeeKiller";
+import DesiFeeKiller from "../../src/components/DesiFeeKiller";
 
 export const metadata = {
-  title: "FeeKiller.ai — App Dashboard",
-  description: "Upload a delivery screenshot. AFAI strips the markup instantly.",
+  title: "FeeKiller.ai — Stop Getting Overcharged",
+  description: "Take a photo of your food delivery bill. We find overcharges and get your money back.",
 };
 
 export default function AppDashboard() {
-  return <AFAI_FeeKiller />;
+  return <DesiFeeKiller />;
 }
