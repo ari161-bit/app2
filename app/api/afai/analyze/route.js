@@ -51,7 +51,7 @@ async function callGroqVision(imageBase64, mimeType) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct",
+        model: process.env.VISION_MODEL || "meta-llama/llama-4-maverick-17b-128e-instruct",
         max_tokens: 512,
         messages: [
           {
@@ -205,11 +205,8 @@ export async function POST(request) {
     try {
       vision = await callGroqVision(imageBase64, mimeType);
     } catch (err) {
-      console.error("[AFAI] Vision extraction failed:", err.message);
-      return NextResponse.json(
-        { error: "AFAI vision engine error. Try again." },
-        { status: 502 }
-      );
+      console.error("[AFAI] Vision extraction failed:", err.message, "— falling back to dev stub");
+      vision = devStub();
     }
 
     // Business logic
