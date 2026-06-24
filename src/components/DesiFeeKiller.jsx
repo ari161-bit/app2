@@ -56,15 +56,26 @@ function getScanLines(platformKey) {
   ];
 }
 
+// ─── Platform fallback portals ────────────────────────────────────────────────
+
+const PLATFORM_PORTALS = {
+  doordash:  "https://www.doordash.com",
+  ubereats:  "https://www.ubereats.com",
+  foodpanda: "https://www.foodpanda.pk",
+};
+
 // ─── Safe restaurant URL ──────────────────────────────────────────────────────
 
-function openRestaurant(raw) {
-  try {
-    const url = new URL(raw?.startsWith("http") ? raw : `https://${raw}`);
-    window.open(url.origin, "_blank", "noopener,noreferrer");
-  } catch {
-    window.open("https://google.com/search?q=restaurant+order+online", "_blank", "noopener,noreferrer");
+function openRestaurant(raw, platformKey) {
+  if (raw) {
+    try {
+      const url = new URL(raw.startsWith("http") ? raw : `https://${raw}`);
+      window.open(url.origin, "_blank", "noopener,noreferrer");
+      return;
+    } catch {}
   }
+  // No verified URL — fall back to the platform's own portal
+  window.open(PLATFORM_PORTALS[platformKey] ?? "https://google.com/search?q=order+food+online", "_blank", "noopener,noreferrer");
 }
 
 // ─── Format currency ──────────────────────────────────────────────────────────
@@ -470,18 +481,18 @@ export default function DesiFeeKiller() {
               </p>
             </div>
 
-            {/* Restaurant direct link */}
-            {s.result.direct_channel && (
-              <div className="rounded-2xl border border-white/[0.08] bg-[#0b0c10] p-5">
+            {/* Restaurant / platform link — always shown */}
+            <div className="rounded-2xl border border-white/[0.08] bg-[#0b0c10] p-5">
                 <p className="text-base font-black text-white mb-1">🏪 Step 3: Order Directly From Restaurant</p>
                 <p className="text-xs text-zinc-500 mb-4">(Seedha restaurant se order karein — koi extra charge nahi!)</p>
-                <button onClick={() => openRestaurant(s.result.direct_channel)}
+                <button onClick={() => openRestaurant(s.result.direct_channel, s.platform)}
                   className="w-full py-5 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-black text-lg shadow-lg shadow-emerald-500/20 active:scale-95 transition-transform">
-                  🌐 Open Restaurant Website
-                  <span className="block text-sm font-normal opacity-80 mt-1">(Restaurant ki website kholein)</span>
+                  🌐 {s.result.direct_channel ? "Open Restaurant Website" : `Open ${PLATFORMS[s.platform].label} Portal`}
+                  <span className="block text-sm font-normal opacity-80 mt-1">
+                    {s.result.direct_channel ? "(Restaurant ki website kholein)" : "(Platform par seedha order karein)"}
+                  </span>
                 </button>
-              </div>
-            )}
+            </div>
 
             {/* Promo codes */}
             {s.result.promo_codes?.length > 0 && (

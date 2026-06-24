@@ -129,13 +129,12 @@ function computePreorder(vision) {
   const markupRate = MARKUP_RATES[platform] ?? 0.26;
   const saved      = Math.round(original * markupRate * 100) / 100;
   const restaurant = (vision.restaurant_name || "").trim();
-  const slug       = restaurant.toLowerCase().replace(/[^a-z0-9]/g, "");
 
   return {
     platform,
     original_amount: original,
     saved_amount:    saved,
-    direct_channel:  slug ? `https://${slug}.com/order` : null,
+    direct_channel:  null, // populated only when Groq returns a verified URL field
     promo_codes: [
       "DIRECT10",
       restaurant
