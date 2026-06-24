@@ -14,22 +14,39 @@ import { NextResponse } from "next/server";
 
 const MARKUP_RATES = {
   "uber eats": 0.31,
+  ubereats:    0.31,
   doordash:    0.29,
   grubhub:     0.27,
   instacart:   0.25,
   postmates:   0.28,
+  foodpanda:   0.32,
   swiggy:      0.30,
   zomato:      0.28,
 };
 
 const SLA_MINUTES = {
   "uber eats": 45,
+  ubereats:    45,
   doordash:    50,
   grubhub:     55,
   instacart:   60,
   postmates:   50,
+  foodpanda:   40,
   swiggy:      40,
   zomato:      45,
+};
+
+// Currency metadata per platform
+const PLATFORM_CURRENCY = {
+  doordash:  { symbol: "$",    code: "USD" },
+  ubereats:  { symbol: "$",    code: "USD" },
+  "uber eats": { symbol: "$", code: "USD" },
+  grubhub:   { symbol: "$",    code: "USD" },
+  instacart: { symbol: "$",    code: "USD" },
+  postmates: { symbol: "$",    code: "USD" },
+  foodpanda: { symbol: "Rs. ", code: "PKR" },
+  swiggy:    { symbol: "₹",    code: "INR" },
+  zomato:    { symbol: "₹",    code: "INR" },
 };
 
 // ─── Groq Vision call ─────────────────────────────────────────────────────────
@@ -39,8 +56,7 @@ async function callGroqVision(imageBase64, mimeType) {
 
   if (!apiKey) {
     console.warn("[AFAI] VISION_API_KEY not set — using dev stub.");
-    return devStub();
-  }
+    return null; // caller will use devStub(platformHint)
 
   const response = await fetch(
     "https://api.groq.com/openai/v1/chat/completions",
@@ -91,11 +107,15 @@ async function callGroqVision(imageBase64, mimeType) {
   return JSON.parse(match[0]);
 }
 
-function devStub() {
+function devStub(platformHint = "doordash") {
+  const stubs = {
+    doordash:  { platform: "doordash",  total_amount: 42.80,   restaurant_name: "Shake Shack" },
+    ubereats:  { platform: "ubereats",  total_amount: 38.50,   restaurant_name: "Chipotle" },
+    foodpanda: { platform: "foodpanda", total_amount: 1200.00, restaurant_name: "Savour Foods" },
+  };
+  const base = stubs[platformHint] ?? stubs.doordash;
   return {
-    platform:           "doordash",
-    total_amount:       42.8,
-    restaurant_name:    "Shake Shack",
+    ...base,
     delivery_timestamp: "2026-06-22T20:10:00Z",
     order_timestamp:    "2026-06-22T19:15:00Z",
   };
@@ -155,14 +175,22 @@ function computePostorder(vision) {
   };
 }
 
+function fmtAmount(amount, platform) {
+  const { symbol, code } = PLATFORM_CURRENCY[platform] ?? { symbol: "$", code: "USD" };
+  if (code === "PKR" || code === "INR") return `${symbol}${Math.round(amount).toLocaleString()}`;
+  return `${symbol}${Number(amount).toFixed(2)}`;
+}
+
 function buildScripts(platform, total, refund, lateMin) {
-  const cap = platform.charAt(0).toUpperCase() + platform.slice(1);
+  const cap   = platform.charAt(0).toUpperCase() + platform.slice(1);
+  const fmtT  = fmtAmount(total, platform);
+  const fmtR  = fmtAmount(refund, platform);
   return [
-    `Hi ${cap} Support — my order totaling $${total.toFixed(2)} arrived ${lateMin} minutes past your guaranteed delivery window, constituting an SLA breach. Per your Late Delivery Guarantee, I am formally requesting a refund of $${refund.toFixed(2)} to my original payment method. Please process this immediately and confirm within 24 hours.`,
+    `Hi ${cap} Support — my order totaling ${fmtT} arrived ${lateMin} minutes past your guaranteed delivery window, constituting an SLA breach. Per your Late Delivery Guarantee, I am formally requesting a refund of ${fmtR} to my original payment method. Please process this immediately and confirm within 24 hours.`,
 
-    `ESCALATION — ${cap} Tier 2 / Trust & Safety: I reported a ${lateMin}-minute SLA breach on a $${total.toFixed(2)} order and received no resolution. Requested refund: $${refund.toFixed(2)}. Failure to resolve within 48 hours will result in a chargeback and a BBB complaint. Escalate immediately.`,
+    `ESCALATION — ${cap} Tier 2 / Trust & Safety: I reported a ${lateMin}-minute SLA breach on a ${fmtT} order and received no resolution. Requested refund: ${fmtR}. Failure to resolve within 48 hours will result in a chargeback and a formal consumer complaint. Escalate immediately.`,
 
-    `[BANK DISPUTE RECORD]\nMerchant: ${cap}  |  Order Total: $${total.toFixed(2)}\nDispute Basis: SLA breach — ${lateMin} min late.\nRefund of $${refund.toFixed(2)} requested and denied.\nInitiating chargeback under card network dispute rights.`,
+    `[BANK DISPUTE RECORD]\nMerchant: ${cap}  |  Order Total: ${fmtT}\nDispute Basis: SLA breach — ${lateMin} min late.\nRefund of ${fmtR} requested and denied.\nInitiating chargeback under card network dispute rights.`,
   ];
 }
 
@@ -170,9 +198,10 @@ function buildScripts(platform, total, refund, lateMin) {
 
 export async function POST(request) {
   try {
-    const formData = await request.formData();
-    const file     = formData.get("file");
-    const mode     = formData.get("mode") || "preorder";
+    const formData     = await request.formData();
+    const file         = formData.get("file");
+    const mode         = formData.get("mode") || "preorder";
+    const platformHint = (formData.get("platform") || "doordash").toLowerCase();
 
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "No image file uploaded." }, { status: 400 });
@@ -204,9 +233,14 @@ export async function POST(request) {
     let vision;
     try {
       vision = await callGroqVision(imageBase64, mimeType);
+      if (!vision) {
+        vision = devStub(platformHint);
+      } else if (!vision.platform || vision.platform === "unknown") {
+        vision.platform = platformHint;
+      }
     } catch (err) {
       console.error("[AFAI] Vision extraction failed:", err.message, "— falling back to dev stub");
-      vision = devStub();
+      vision = devStub(platformHint);
     }
 
     // Business logic
