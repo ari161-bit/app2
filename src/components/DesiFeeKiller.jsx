@@ -332,28 +332,51 @@ export default function DesiFeeKiller() {
 
         {/* ── PLATFORM SELECT ── */}
         {s.step === "platform" && (
-          <div className="flex flex-col gap-3 fade-up">
-            <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-600 text-center mb-1">
-              // SELECT YOUR APP / PLATFORM CHUNNING
-            </p>
-            <div className="rounded-2xl border border-white/[0.07] bg-[#0b0c10] p-4 flex flex-col gap-3">
-              {Object.entries(PLATFORMS).map(([key, plat]) => (
-                <button key={key}
-                  onClick={() => dispatch({ type: "SET_PLATFORM", platform: key })}
-                  className={`flex items-center justify-between p-5 rounded-xl border border-white/[0.05] hover:${plat.accent.border} ${plat.accent.bg} transition-all active:scale-[0.98] text-left`}>
-                  <div className="flex items-center gap-4">
-                    <span className="text-3xl">{plat.emoji}</span>
+          <div className="fade-up w-full max-w-2xl mx-auto">
+            {/* Console header */}
+            <div className="flex items-center justify-between mb-5 border-b border-zinc-900 pb-3">
+              <span className="font-mono text-[10px] text-zinc-500 tracking-[0.2em] uppercase">// SELECT TARGET ENVIRONMENT</span>
+              <span className="font-mono text-[10px] text-zinc-700">GRID CONSOLE v1.0</span>
+            </div>
+
+            {/* Premium platform cards */}
+            <div className="flex flex-col gap-3">
+              {[
+                { key: "doordash",  name: "DoorDash",   region: "GLOBAL // NA",  currency: "USD ($)",    status: "DISCOVERY ACTIVE",  dot: "group-hover:bg-red-500",     badge: "text-red-400 border-red-950/60 bg-red-950/20" },
+                { key: "ubereats",  name: "Uber Eats",  region: "GLOBAL // INT", currency: "USD ($)",    status: "SYSTEM ONLINE",     dot: "group-hover:bg-emerald-500", badge: "text-emerald-400 border-emerald-950/60 bg-emerald-950/20" },
+                { key: "foodpanda", name: "foodpanda",  region: "REGIONAL // PK",currency: "PKR (Rs.)",  status: "LOCAL HUB LOADED",  dot: "group-hover:bg-pink-500",    badge: "text-pink-400 border-pink-950/60 bg-pink-950/20" },
+              ].map((plat) => (
+                <button key={plat.key}
+                  onClick={() => dispatch({ type: "SET_PLATFORM", platform: plat.key })}
+                  className="group w-full text-left bg-[#090a0f] border border-zinc-900 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-[#0e1017] hover:border-zinc-700 transition-all duration-200 active:scale-[0.99]">
+
+                  <div className="flex items-start gap-4">
+                    <div className="mt-1.5 shrink-0">
+                      <div className={`h-2 w-2 rounded-full bg-zinc-800 ${plat.dot} transition-colors duration-300`} />
+                    </div>
                     <div>
-                      <p className={`text-lg font-black ${plat.accent.text}`}>{plat.label}</p>
-                      <p className="text-xs text-zinc-600 font-mono mt-0.5">
-                        {plat.region} · {plat.currency.code} ({plat.currency.symbol.trim()})
+                      <p className="text-base font-semibold text-white group-hover:text-zinc-100 transition-colors">{plat.name}</p>
+                      <p className="font-mono text-[11px] text-zinc-600 mt-0.5 tracking-wide">
+                        {plat.region} <span className="text-zinc-700">•</span> <span className="text-zinc-500">{plat.currency}</span>
                       </p>
                     </div>
                   </div>
-                  <span className="text-zinc-600 text-xl">→</span>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-5 border-t border-zinc-900 pt-3 sm:border-0 sm:pt-0">
+                    <span className={`font-mono text-[9px] font-bold tracking-widest px-2.5 py-1 border rounded-md uppercase ${plat.badge}`}>
+                      • {plat.status}
+                    </span>
+                    <svg className="w-4 h-4 text-zinc-700 group-hover:text-white group-hover:translate-x-0.5 transition-all duration-200 hidden sm:block shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
                 </button>
               ))}
             </div>
+
+            <p className="text-center font-mono text-[10px] text-zinc-700 mt-5 tracking-wide">
+              Secure handshake established. Select a module to process bill analytics loop.
+            </p>
           </div>
         )}
 
