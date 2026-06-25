@@ -56,7 +56,8 @@ async function callGroqVision(imageBase64, mimeType) {
 
   if (!apiKey) {
     console.warn("[AFAI] VISION_API_KEY not set — using dev stub.");
-    return null; // caller will use devStub(platformHint)
+    return null;
+  }
 
   const response = await fetch(
     "https://api.groq.com/openai/v1/chat/completions",

@@ -15,7 +15,6 @@ import { useState, useRef, useCallback, useEffect, useReducer } from "react";
 const PLATFORMS = {
   doordash: {
     label:    "DoorDash",
-    emoji:    "🔴",
     region:   "Global",
     currency: { symbol: "$",    code: "USD" },
     accent:   { text: "text-red-400",     border: "border-red-500/30",     bg: "bg-red-500/[0.06]",     badge: "text-red-400 border-red-400/20 bg-red-400/[0.06]" },
@@ -24,7 +23,6 @@ const PLATFORMS = {
   },
   ubereats: {
     label:    "Uber Eats",
-    emoji:    "🟢",
     region:   "Global",
     currency: { symbol: "$",    code: "USD" },
     accent:   { text: "text-emerald-400", border: "border-emerald-500/30", bg: "bg-emerald-500/[0.06]", badge: "text-emerald-400 border-emerald-400/20 bg-emerald-400/[0.06]" },
@@ -33,7 +31,6 @@ const PLATFORMS = {
   },
   foodpanda: {
     label:    "foodpanda",
-    emoji:    "🩷",
     region:   "Pakistan / Asia",
     currency: { symbol: "Rs. ", code: "PKR" },
     accent:   { text: "text-pink-400",    border: "border-pink-500/30",    bg: "bg-pink-500/[0.06]",    badge: "text-pink-400 border-pink-400/20 bg-pink-400/[0.06]" },
@@ -315,7 +312,7 @@ export default function DesiFeeKiller() {
         <div className="absolute top-0 left-1/2 -translate-x-1/2 h-96 w-96 rounded-full bg-cyan-500/[0.04] blur-3xl" />
       </div>
 
-      <div className="relative max-w-lg mx-auto px-4 py-10 pb-28">
+      <div className="relative max-w-xl mx-auto px-4 py-10 pb-28">
 
         {/* ── Header ── */}
         <div className="text-center mb-8">
