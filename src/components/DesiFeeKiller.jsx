@@ -334,39 +334,41 @@ export default function DesiFeeKiller() {
         {s.step === "platform" && (
           <div className="fade-up w-full max-w-2xl mx-auto">
             {/* Console header */}
-            <div className="flex items-center justify-between mb-5 border-b border-zinc-900 pb-3">
+            <div className="flex items-center justify-between mb-5 border-b border-zinc-900/80 pb-3">
               <span className="font-mono text-[10px] text-zinc-500 tracking-[0.2em] uppercase">// SELECT TARGET ENVIRONMENT</span>
               <span className="font-mono text-[10px] text-zinc-700">GRID CONSOLE v1.0</span>
             </div>
 
-            {/* Premium platform cards */}
-            <div className="flex flex-col gap-3">
+            {/* Platform cards — Apex OS design language */}
+            <div className="flex flex-col gap-2.5">
               {[
-                { key: "doordash",  name: "DoorDash",   region: "GLOBAL // NA",  currency: "USD ($)",    status: "DISCOVERY ACTIVE",  dot: "group-hover:bg-red-500",     badge: "text-red-400 border-red-950/60 bg-red-950/20" },
-                { key: "ubereats",  name: "Uber Eats",  region: "GLOBAL // INT", currency: "USD ($)",    status: "SYSTEM ONLINE",     dot: "group-hover:bg-emerald-500", badge: "text-emerald-400 border-emerald-950/60 bg-emerald-950/20" },
-                { key: "foodpanda", name: "foodpanda",  region: "REGIONAL // PK",currency: "PKR (Rs.)",  status: "LOCAL HUB LOADED",  dot: "group-hover:bg-pink-500",    badge: "text-pink-400 border-pink-950/60 bg-pink-950/20" },
+                { key: "doordash",  name: "DoorDash",   region: "GLOBAL // NA",  currency: "USD ($)",   status: "DISCOVERY ACTIVE", badge: "text-red-400 border-red-500/20 bg-red-500/[0.06]" },
+                { key: "ubereats",  name: "Uber Eats",  region: "GLOBAL // INT", currency: "USD ($)",   status: "SYSTEM ONLINE",    badge: "text-emerald-400 border-emerald-500/20 bg-emerald-500/[0.06]" },
+                { key: "foodpanda", name: "foodpanda",  region: "REGIONAL // PK",currency: "PKR (Rs.)", status: "LOCAL HUB LOADED", badge: "text-pink-400 border-pink-500/20 bg-pink-500/[0.06]" },
               ].map((plat) => (
                 <button key={plat.key}
                   onClick={() => dispatch({ type: "SET_PLATFORM", platform: plat.key })}
-                  className="group w-full text-left bg-[#090a0f] border border-zinc-900 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-[#0e1017] hover:border-zinc-700 transition-all duration-200 active:scale-[0.99]">
+                  className="group relative w-full text-left bg-[#0b0c12] border border-zinc-800/60 rounded-xl px-5 py-4 flex items-center justify-between gap-4 hover:bg-[#10111a] hover:border-indigo-500/40 hover:shadow-[0_0_20px_rgba(99,102,241,0.08)] transition-all duration-200 active:scale-[0.99] overflow-hidden">
 
-                  <div className="flex items-start gap-4">
-                    <div className="mt-1.5 shrink-0">
-                      <div className={`h-2 w-2 rounded-full bg-zinc-800 ${plat.dot} transition-colors duration-300`} />
-                    </div>
+                  {/* Purple left-edge accent on hover */}
+                  <div className="absolute left-0 top-0 h-full w-[2px] bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded-l-xl" />
+
+                  <div className="flex items-center gap-4">
+                    {/* Dot indicator */}
+                    <div className="h-1.5 w-1.5 rounded-full bg-zinc-700 group-hover:bg-indigo-400 transition-colors duration-300 shrink-0" />
                     <div>
-                      <p className="text-base font-semibold text-white group-hover:text-zinc-100 transition-colors">{plat.name}</p>
-                      <p className="font-mono text-[11px] text-zinc-600 mt-0.5 tracking-wide">
-                        {plat.region} <span className="text-zinc-700">•</span> <span className="text-zinc-500">{plat.currency}</span>
+                      <p className="text-sm font-semibold text-zinc-200 group-hover:text-white transition-colors tracking-tight">{plat.name}</p>
+                      <p className="font-mono text-[10px] text-zinc-600 mt-0.5 tracking-wide">
+                        {plat.region} <span className="text-zinc-800">·</span> <span className="text-zinc-500">{plat.currency}</span>
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-5 border-t border-zinc-900 pt-3 sm:border-0 sm:pt-0">
-                    <span className={`font-mono text-[9px] font-bold tracking-widest px-2.5 py-1 border rounded-md uppercase ${plat.badge}`}>
-                      • {plat.status}
+                  <div className="flex items-center gap-4">
+                    <span className={`font-mono text-[9px] font-bold tracking-widest px-2 py-0.5 border rounded uppercase ${plat.badge}`}>
+                      {plat.status}
                     </span>
-                    <svg className="w-4 h-4 text-zinc-700 group-hover:text-white group-hover:translate-x-0.5 transition-all duration-200 hidden sm:block shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3.5 h-3.5 text-zinc-700 group-hover:text-indigo-400 group-hover:translate-x-0.5 transition-all duration-200 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
                     </svg>
                   </div>
