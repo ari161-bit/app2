@@ -3,7 +3,6 @@
 /**
  * src/components/DesiFeeKiller.jsx
  * Aquarius OS · FeeKiller.ai · Budget Router Terminal
- * Platforms: DoorDash · Uber Eats · foodpanda
  */
 
 import { useState, useReducer, useRef } from "react";
@@ -12,460 +11,478 @@ import { useState, useReducer, useRef } from "react";
 
 const PLATFORMS = {
   doordash: {
-    label:    "DoorDash",
-    region:   "GLOBAL // NA",
-    currency: { symbol: "$",   code: "USD" },
-    badge:    "text-red-400 border-red-500/20 bg-red-500/[0.06]",
-    accent:   { text: "text-red-400", border: "border-red-500/30", bg: "bg-red-500/[0.06]" },
+    label: "DoorDash",
+    sub: "US & Canada",
+    currency: { symbol: "$", code: "USD" },
     markupPct: 29,
+    color: { primary: "#f87171", glow: "rgba(248,113,113,0.15)", ring: "rgba(248,113,113,0.3)", dim: "rgba(248,113,113,0.08)", hex: "red" },
+    icon: "🍔",
   },
   ubereats: {
-    label:    "Uber Eats",
-    region:   "GLOBAL // INT",
-    currency: { symbol: "$",   code: "USD" },
-    badge:    "text-emerald-400 border-emerald-500/20 bg-emerald-500/[0.06]",
-    accent:   { text: "text-emerald-400", border: "border-emerald-500/30", bg: "bg-emerald-500/[0.06]" },
+    label: "Uber Eats",
+    sub: "Worldwide",
+    currency: { symbol: "$", code: "USD" },
     markupPct: 31,
+    color: { primary: "#34d399", glow: "rgba(52,211,153,0.15)", ring: "rgba(52,211,153,0.3)", dim: "rgba(52,211,153,0.08)", hex: "emerald" },
+    icon: "🛵",
   },
   foodpanda: {
-    label:    "foodpanda",
-    region:   "REGIONAL // PK",
+    label: "foodpanda",
+    sub: "Pakistan · PK",
     currency: { symbol: "Rs. ", code: "PKR" },
-    badge:    "text-pink-400 border-pink-500/20 bg-pink-500/[0.06]",
-    accent:   { text: "text-pink-400", border: "border-pink-500/30", bg: "bg-pink-500/[0.06]" },
     markupPct: 32,
+    color: { primary: "#f472b6", glow: "rgba(244,114,182,0.15)", ring: "rgba(244,114,182,0.3)", dim: "rgba(244,114,182,0.08)", hex: "pink" },
+    icon: "🐼",
   },
 };
 
-// ─── Telemetry lines ──────────────────────────────────────────────────────────
-
 const ROUTE_LINES = [
-  "Stripping platform markup layer …",
-  "Querying direct merchant registry …",
-  "Calculating real-cost delta …",
-  "Verifying direct channel URL …",
-  "✅ Route locked. Direct channel found.",
+  "Stripping platform markup layer",
+  "Querying direct merchant registry",
+  "Calculating real-cost delta",
+  "Verifying direct channel URL",
 ];
 
-// ─── Currency formatter ───────────────────────────────────────────────────────
-
-function fmt(amount, platformKey) {
-  const { symbol, code } = PLATFORMS[platformKey].currency;
+function fmt(amount, pk) {
+  const { symbol, code } = PLATFORMS[pk].currency;
   if (code === "PKR") return `${symbol}${Math.round(amount).toLocaleString("en-PK")}`;
   return `${symbol}${Number(amount).toFixed(2)}`;
 }
 
-// ─── Reducer ──────────────────────────────────────────────────────────────────
-
-const INIT = {
-  step:      "platform",  // platform | input | routing | result | error
-  platform:  "doordash",
-  foodQuery: "",
-  budget:    "",
-  scanLines: [],
-  result:    null,
-  errorMsg:  null,
-};
+const INIT = { step: "platform", platform: "doordash", foodQuery: "", budget: 0, scanLines: 0, result: null, errorMsg: null };
 
 function reducer(s, a) {
   switch (a.type) {
     case "SET_PLATFORM": return { ...s, platform: a.platform, step: "input" };
-    case "START_ROUTE":  return { ...s, foodQuery: a.foodQuery, budget: a.budget, step: "routing", scanLines: [], result: null };
-    case "ADD_LINE":     return { ...s, scanLines: [...s.scanLines, a.line] };
+    case "START_ROUTE":  return { ...s, foodQuery: a.foodQuery, budget: a.budget, step: "routing", scanLines: 0, result: null };
+    case "TICK":         return { ...s, scanLines: s.scanLines + 1 };
     case "RESULT":       return { ...s, step: "result", result: a.result };
     case "ERROR":        return { ...s, step: "error", errorMsg: a.msg };
-    case "BACK_INPUT":   return { ...s, step: "input", scanLines: [], result: null, errorMsg: null };
+    case "BACK_INPUT":   return { ...s, step: "input", scanLines: 0, result: null, errorMsg: null };
     case "RESET":        return { ...INIT };
     default:             return s;
   }
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
-
 export default function DesiFeeKiller() {
   const [s, dispatch] = useReducer(reducer, INIT);
-  const [query,  setQuery]  = useState("");
+  const [query, setQuery]   = useState("");
   const [budget, setBudget] = useState("");
-  const [qErr,   setQErr]   = useState("");
-  const [bErr,   setBErr]   = useState("");
-  const routingRef = useRef(false);
-
+  const [qErr, setQErr]     = useState("");
+  const [bErr, setBErr]     = useState("");
+  const busy = useRef(false);
   const p = PLATFORMS[s.platform];
 
-  // ─── Route handler ──────────────────────────────────────────────────────────
-
   async function handleRoute() {
-    let valid = true;
-    if (!query.trim())              { setQErr("Enter what you want to eat.");   valid = false; }
-    else                            { setQErr(""); }
-    if (!budget || Number(budget) <= 0) { setBErr("Enter a valid budget."); valid = false; }
-    else                            { setBErr(""); }
-    if (!valid || routingRef.current) return;
+    let ok = true;
+    if (!query.trim())           { setQErr("Tell us what you want to eat."); ok = false; } else setQErr("");
+    if (!budget || +budget <= 0) { setBErr("Enter a budget above 0.");       ok = false; } else setBErr("");
+    if (!ok || busy.current) return;
+    busy.current = true;
 
-    routingRef.current = true;
-    dispatch({ type: "START_ROUTE", foodQuery: query.trim(), budget: Number(budget) });
+    dispatch({ type: "START_ROUTE", foodQuery: query.trim(), budget: +budget });
 
-    // Telemetry drip
-    const telPromise = (async () => {
-      for (let i = 0; i < ROUTE_LINES.length - 1; i++) {
-        await new Promise(r => setTimeout(r, 650 + Math.random() * 250));
-        dispatch({ type: "ADD_LINE", line: ROUTE_LINES[i] });
+    const telDrip = (async () => {
+      for (let i = 0; i < ROUTE_LINES.length; i++) {
+        await new Promise(r => setTimeout(r, 700 + Math.random() * 300));
+        dispatch({ type: "TICK" });
       }
     })();
 
-    // Real API call
-    const apiPromise = fetch("/api/afai/route", {
-      method:  "POST",
+    const apiFetch = fetch("/api/afai/route", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        query:    query.trim(),
-        budget:   Number(budget),
-        platform: s.platform,
-        currency: p.currency.code,
-      }),
+      body: JSON.stringify({ query: query.trim(), budget: +budget, platform: s.platform, currency: p.currency.code }),
     });
 
     try {
-      const [, res] = await Promise.all([telPromise, apiPromise]);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        routingRef.current = false;
-        dispatch({ type: "ERROR", msg: body?.error ?? `Routing engine error ${res.status}. Try again.` });
-        return;
-      }
+      const [, res] = await Promise.all([telDrip, apiFetch]);
+      if (!res.ok) { const b = await res.json().catch(() => ({})); busy.current = false; dispatch({ type: "ERROR", msg: b?.error ?? "Routing error. Try again." }); return; }
       const result = await res.json();
-      dispatch({ type: "ADD_LINE", line: ROUTE_LINES[ROUTE_LINES.length - 1] });
-      await new Promise(r => setTimeout(r, 400));
-      routingRef.current = false;
+      await new Promise(r => setTimeout(r, 300));
+      busy.current = false;
       dispatch({ type: "RESULT", result });
     } catch {
-      routingRef.current = false;
-      dispatch({ type: "ERROR", msg: "Cannot reach routing engine. Check your connection and try again." });
+      busy.current = false;
+      dispatch({ type: "ERROR", msg: "Connection failed. Check your network and try again." });
     }
   }
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+    .fk-root { font-family: 'Inter', system-ui, sans-serif; }
+    .fk-mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+    @keyframes fk-in  { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes fk-glow{ 0%,100%{opacity:.5} 50%{opacity:1} }
+    @keyframes fk-spin{ to{transform:rotate(360deg)} }
+    @keyframes fk-bar { from{width:0} to{width:100%} }
+    @keyframes fk-pulse2 { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.5);opacity:1} }
+    .fk-in   { animation: fk-in .4s cubic-bezier(.16,1,.3,1) both }
+    .fk-in2  { animation: fk-in .4s .08s cubic-bezier(.16,1,.3,1) both }
+    .fk-in3  { animation: fk-in .4s .16s cubic-bezier(.16,1,.3,1) both }
+    .fk-card { background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.06); border-radius: 20px; backdrop-filter: blur(12px); }
+    .fk-input { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; color: #fff; outline: none; width: 100%; font-family: 'Inter',system-ui,sans-serif; font-size: 15px; padding: 16px 18px; transition: border-color .2s, box-shadow .2s; }
+    .fk-input::placeholder { color: rgba(255,255,255,.18); }
+    .fk-input:focus { border-color: rgba(6,182,212,.5); box-shadow: 0 0 0 3px rgba(6,182,212,.08), 0 0 20px rgba(6,182,212,.06); }
+    .fk-btn { border: none; cursor: pointer; border-radius: 14px; font-weight: 800; letter-spacing: -.01em; transition: transform .15s, box-shadow .15s, opacity .15s; }
+    .fk-btn:hover { transform: translateY(-1px); }
+    .fk-btn:active { transform: scale(.97); }
+    .fk-plat { background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.06); border-radius: 16px; cursor: pointer; transition: all .2s cubic-bezier(.16,1,.3,1); text-align: left; width: 100%; overflow: hidden; position: relative; }
+    .fk-plat:hover { transform: translateY(-2px); }
+    .fk-plat:active { transform: scale(.98); }
+    .fk-result-appear { animation: fk-in .5s cubic-bezier(.16,1,.3,1) both; }
+    .fk-spin { animation: fk-spin 1.2s linear infinite; }
+    .fk-tag { display: inline-flex; align-items: center; gap: 5px; font-family: 'JetBrains Mono',monospace; font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; border-radius: 6px; padding: 3px 10px; border: 1px solid; }
+    input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    .noise::after { content:''; position:absolute; inset:0; border-radius:inherit; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E"); pointer-events:none; }
+  `;
 
   return (
-    <div className="min-h-svh bg-[#060709] text-white antialiased">
-      <style>{`
-        @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-        .fade-up { animation: fadeUp 0.32s ease both }
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-        .cursor-blink { animation: blink 1.1s step-start infinite }
-      `}</style>
+    <div className="fk-root" style={{ minHeight: "100svh", background: "#070810", color: "#fff", overflowX: "hidden" }}>
+      <style>{css}</style>
 
-      {/* Ambient glow */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 h-96 w-96 rounded-full bg-cyan-500/[0.04] blur-3xl" />
+      {/* ── Background atmosphere ── */}
+      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: "-20%", left: "50%", transform: "translateX(-50%)", width: 800, height: 500, borderRadius: "50%", background: "radial-gradient(ellipse, rgba(6,182,212,.07) 0%, transparent 70%)", filter: "blur(40px)" }} />
+        <div style={{ position: "absolute", bottom: "-10%", left: "-10%", width: 400, height: 400, borderRadius: "50%", background: "radial-gradient(ellipse, rgba(99,102,241,.05) 0%, transparent 70%)", filter: "blur(60px)" }} />
+        <div style={{ position: "absolute", bottom: "-10%", right: "-10%", width: 300, height: 300, borderRadius: "50%", background: "radial-gradient(ellipse, rgba(244,114,182,.04) 0%, transparent 70%)", filter: "blur(60px)" }} />
+        {/* Grid lines */}
+        <div style={{ position: "absolute", inset: 0, backgroundImage: "linear-gradient(rgba(255,255,255,.012) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.012) 1px, transparent 1px)", backgroundSize: "60px 60px" }} />
       </div>
 
-      <div className="relative max-w-xl mx-auto px-4 py-10 pb-28">
+      <div style={{ position: "relative", maxWidth: 540, margin: "0 auto", padding: "48px 20px 80px" }}>
 
-        {/* ── Header ── */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 border border-cyan-500/20 bg-cyan-500/[0.06] rounded-full px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-400 mb-4">
-            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
-            FeeKiller.ai · Budget Router
+        {/* ── Wordmark ── */}
+        <div className="fk-in" style={{ textAlign: "center", marginBottom: 48 }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "rgba(6,182,212,.07)", border: "1px solid rgba(6,182,212,.18)", borderRadius: 50, padding: "7px 18px 7px 12px", marginBottom: 28 }}>
+            <div style={{ width: 22, height: 22, borderRadius: 8, background: "linear-gradient(135deg,#06b6d4,#6366f1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>⚡</div>
+            <span className="fk-mono" style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".16em", color: "#67e8f9", textTransform: "uppercase" }}>FeeKiller.ai</span>
+            <span style={{ width: 1, height: 12, background: "rgba(6,182,212,.25)" }} />
+            <span className="fk-mono" style={{ fontSize: 9, fontWeight: 500, letterSpacing: ".1em", color: "rgba(103,232,249,.5)" }}>Budget Router v2</span>
           </div>
-          <h1 className="text-3xl font-black tracking-tight mb-2">
-            Skip the Markup.{" "}
-            <span className="text-cyan-400">Order Direct.</span>
+
+          <h1 style={{ fontSize: "clamp(28px,7vw,42px)", fontWeight: 900, letterSpacing: "-.04em", lineHeight: 1.08, marginBottom: 14 }}>
+            Stop paying{" "}
+            <span style={{ background: "linear-gradient(135deg,#22d3ee,#818cf8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+              delivery tax.
+            </span>
           </h1>
-          <p className="text-sm text-zinc-400">
-            Enter what you want + your budget. We find the real restaurant and bypass every hidden app fee.
+          <p style={{ fontSize: 15, color: "rgba(148,163,184,.7)", lineHeight: 1.6, maxWidth: 380, margin: "0 auto" }}>
+            Type what you want to eat and your budget. We find the direct restaurant URL and show exactly how much the app was skimming.
           </p>
         </div>
 
-        {/* ══════════════════ PLATFORM SELECT ══════════════════ */}
+        {/* ══════════ PLATFORM SELECT ══════════ */}
         {s.step === "platform" && (
-          <div className="fade-up w-full">
-            <div className="flex items-center justify-between mb-5 border-b border-zinc-900/80 pb-3">
-              <span className="font-mono text-[10px] text-zinc-500 tracking-[0.2em] uppercase">// SELECT TARGET PLATFORM</span>
-              <span className="font-mono text-[10px] text-zinc-700">ROUTER v2.0</span>
-            </div>
+          <div className="fk-in2">
+            <p className="fk-mono" style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".18em", color: "rgba(100,116,139,.6)", textTransform: "uppercase", marginBottom: 14 }}>// Select delivery platform</p>
 
-            <div className="flex flex-col gap-2.5">
-              {[
-                { key: "doordash",  name: "DoorDash",   region: "GLOBAL // NA",  currency: "USD ($)",   status: "DISCOVERY ACTIVE", badge: "text-red-400 border-red-500/20 bg-red-500/[0.06]" },
-                { key: "ubereats",  name: "Uber Eats",  region: "GLOBAL // INT", currency: "USD ($)",   status: "SYSTEM ONLINE",    badge: "text-emerald-400 border-emerald-500/20 bg-emerald-500/[0.06]" },
-                { key: "foodpanda", name: "foodpanda",  region: "REGIONAL // PK",currency: "PKR (Rs.)", status: "LOCAL HUB LOADED", badge: "text-pink-400 border-pink-500/20 bg-pink-500/[0.06]" },
-              ].map((plat) => (
-                <button key={plat.key}
-                  onClick={() => dispatch({ type: "SET_PLATFORM", platform: plat.key })}
-                  className="group relative w-full text-left bg-[#0b0c12] border border-zinc-800/60 rounded-xl px-5 py-4 flex items-center justify-between gap-4 hover:bg-[#10111a] hover:border-indigo-500/40 hover:shadow-[0_0_20px_rgba(99,102,241,0.08)] transition-all duration-200 active:scale-[0.99] overflow-hidden">
-                  <div className="absolute left-0 top-0 h-full w-[2px] bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded-l-xl" />
-                  <div className="flex items-center gap-4">
-                    <div className="h-1.5 w-1.5 rounded-full bg-zinc-700 group-hover:bg-indigo-400 transition-colors duration-300 shrink-0" />
-                    <div>
-                      <p className="text-sm font-semibold text-zinc-200 group-hover:text-white transition-colors tracking-tight">{plat.name}</p>
-                      <p className="font-mono text-[10px] text-zinc-600 mt-0.5 tracking-wide">
-                        {plat.region} <span className="text-zinc-800">·</span> <span className="text-zinc-500">{plat.currency}</span>
-                      </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {Object.entries(PLATFORMS).map(([key, pl], idx) => (
+                <button key={key} className="fk-plat"
+                  onClick={() => dispatch({ type: "SET_PLATFORM", platform: key })}
+                  style={{ animationDelay: `${idx * .06}s` }}>
+                  {/* Hover glow edge */}
+                  <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: `linear-gradient(180deg, ${pl.color.primary}, transparent)`, opacity: 0, transition: "opacity .2s", borderRadius: "16px 0 0 16px" }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = "1"} />
+                  <div style={{ padding: "18px 22px", display: "flex", alignItems: "center", gap: 16 }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 14, background: pl.color.dim, border: `1px solid ${pl.color.ring}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+                      {pl.icon}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className={`font-mono text-[9px] font-bold tracking-widest px-2 py-0.5 border rounded uppercase ${plat.badge}`}>
-                      {plat.status}
-                    </span>
-                    <svg className="w-3.5 h-3.5 text-zinc-700 group-hover:text-indigo-400 group-hover:translate-x-0.5 transition-all duration-200 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                        <span style={{ fontSize: 15, fontWeight: 700, color: "#f1f5f9" }}>{pl.label}</span>
+                        <span className="fk-tag" style={{ color: pl.color.primary, borderColor: pl.color.ring, background: pl.color.dim }}>
+                          <span style={{ width: 5, height: 5, borderRadius: "50%", background: pl.color.primary, display: "inline-block" }} />
+                          LIVE
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(100,116,139,.6)", display: "flex", gap: 12 }}>
+                        <span>{pl.sub}</span>
+                        <span style={{ color: "rgba(255,255,255,.1)" }}>·</span>
+                        <span>{pl.currency.code}</span>
+                        <span style={{ color: "rgba(255,255,255,.1)" }}>·</span>
+                        <span style={{ color: "rgba(239,68,68,.6)" }}>~{pl.markupPct}% hidden fee</span>
+                      </div>
+                    </div>
+                    <svg width="16" height="16" fill="none" stroke="rgba(100,116,139,.4)" strokeWidth="2" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
                     </svg>
                   </div>
                 </button>
               ))}
             </div>
-
-            <p className="text-center font-mono text-[10px] text-zinc-700 mt-5 tracking-wide">
-              Secure handshake established. Select platform to initialise routing module.
-            </p>
           </div>
         )}
 
-        {/* ══════════════════ BUDGET INPUT ══════════════════ */}
+        {/* ══════════ BUDGET INPUT ══════════ */}
         {s.step === "input" && (
-          <div className="fade-up flex flex-col gap-5">
+          <div className="fk-in" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {/* Back */}
             <button onClick={() => dispatch({ type: "RESET" })}
-              className="text-zinc-500 hover:text-white transition-colors text-sm self-start">
+              style={{ background: "none", border: "none", color: "rgba(100,116,139,.6)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6, alignSelf: "flex-start", padding: 0, transition: "color .2s" }}
+              onMouseEnter={e => e.currentTarget.style.color = "#94a3b8"}
+              onMouseLeave={e => e.currentTarget.style.color = "rgba(100,116,139,.6)"}>
               ← Change platform
             </button>
 
-            <div className="rounded-xl border border-zinc-800/70 bg-[#0b0c12] overflow-hidden">
-              {/* Card header */}
-              <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800/60">
-                <div className="flex items-center gap-2">
-                  <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                  <span className="font-mono text-[10px] text-cyan-400 tracking-widest uppercase">{p.label} // BUDGET ROUTER</span>
-                </div>
-                <span className={`font-mono text-[9px] font-bold tracking-widest px-2 py-0.5 border rounded uppercase ${p.badge}`}>
-                  {p.currency.code}
-                </span>
+            {/* Active platform pill */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, background: p.color.dim, border: `1px solid ${p.color.ring}`, borderRadius: 12, padding: "10px 16px" }}>
+              <span style={{ fontSize: 18 }}>{p.icon}</span>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: p.color.primary }}>{p.label}</span>
+                <span style={{ fontSize: 12, color: "rgba(100,116,139,.6)", marginLeft: 10 }}>{p.currency.code} · {p.markupPct}% markup being bypassed</span>
+              </div>
+              <div style={{ width: 7, height: 7, borderRadius: "50%", background: p.color.primary, boxShadow: `0 0 8px ${p.color.primary}`, animation: "fk-pulse2 2s ease infinite" }} />
+            </div>
+
+            {/* Card */}
+            <div className="fk-card noise" style={{ padding: "28px 24px 24px", position: "relative" }}>
+              {/* Faint top gradient line */}
+              <div style={{ position: "absolute", top: 0, left: "15%", right: "15%", height: 1, background: `linear-gradient(90deg, transparent, ${p.color.primary}40, transparent)` }} />
+
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "rgba(100,116,139,.7)", letterSpacing: ".06em", marginBottom: 10, textTransform: "uppercase" }}>
+                  What do you want to eat?
+                </label>
+                <input type="text" className="fk-input"
+                  value={query}
+                  onChange={e => { setQuery(e.target.value); if (qErr) setQErr(""); }}
+                  onKeyDown={e => e.key === "Enter" && handleRoute()}
+                  placeholder="biryani, burger, sushi, tacos…"
+                  autoFocus
+                  style={{ borderColor: qErr ? "rgba(239,68,68,.5)" : undefined }}
+                />
+                {qErr && <p style={{ fontSize: 12, color: "#f87171", marginTop: 6 }}>{qErr}</p>}
               </div>
 
-              <div className="p-5 flex flex-col gap-5">
-                {/* [01] Food query */}
-                <div className="flex flex-col gap-2">
-                  <label className="font-mono text-[10px] text-zinc-500 tracking-[0.18em] uppercase">
-                    [01] // What do you want to eat?
-                  </label>
-                  <div className={`relative rounded-lg border transition-colors ${qErr ? "border-red-500/40" : "border-zinc-700/60 focus-within:border-cyan-500/50"} bg-[#08090e]`}>
-                    <input
-                      type="text"
-                      value={query}
-                      onChange={e => { setQuery(e.target.value); if (qErr) setQErr(""); }}
-                      onKeyDown={e => e.key === "Enter" && handleRoute()}
-                      placeholder="e.g. biryani, burger, sushi …"
-                      className="w-full bg-transparent px-4 py-3.5 text-sm text-white placeholder-zinc-700 outline-none font-mono"
-                      autoFocus
-                    />
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 font-mono text-[10px] text-zinc-700 cursor-blink">█</span>
-                  </div>
-                  {qErr && <p className="font-mono text-[10px] text-red-400">{qErr}</p>}
-                </div>
-
-                {/* [02] Budget */}
-                <div className="flex flex-col gap-2">
-                  <label className="font-mono text-[10px] text-zinc-500 tracking-[0.18em] uppercase">
-                    [02] // Max budget ({p.currency.code})
-                  </label>
-                  <div className={`relative rounded-lg border transition-colors ${bErr ? "border-red-500/40" : "border-zinc-700/60 focus-within:border-cyan-500/50"} bg-[#08090e] flex items-center`}>
-                    <span className="pl-4 text-sm font-mono text-zinc-500 select-none shrink-0">{p.currency.symbol.trim()}</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={budget}
-                      onChange={e => { setBudget(e.target.value); if (bErr) setBErr(""); }}
-                      onKeyDown={e => e.key === "Enter" && handleRoute()}
-                      placeholder={p.currency.code === "PKR" ? "e.g. 1500" : "e.g. 25"}
-                      className="flex-1 bg-transparent px-3 py-3.5 text-sm text-white placeholder-zinc-700 outline-none font-mono"
-                    />
-                  </div>
-                  {bErr && <p className="font-mono text-[10px] text-red-400">{bErr}</p>}
-                </div>
-
-                {/* CTA */}
-                <button onClick={handleRoute}
-                  className="w-full py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 text-white font-black text-base tracking-tight shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 active:scale-[0.98] transition-all">
-                  ⚡ BYPASS MARKUPS — FIND DIRECT CHANNEL
-                </button>
-
-                {/* Info strip */}
-                <div className="flex items-start gap-3 bg-zinc-900/40 border border-zinc-800/40 rounded-lg px-4 py-3">
-                  <span className="font-mono text-[9px] text-zinc-600 tracking-wider leading-relaxed">
-                    // Engine strips {p.label} service fees (~{p.markupPct}% markup) and routes you directly to the merchant storefront.
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "rgba(100,116,139,.7)", letterSpacing: ".06em", marginBottom: 10, textTransform: "uppercase" }}>
+                  Your max budget ({p.currency.code})
+                </label>
+                <div style={{ position: "relative" }}>
+                  <span style={{ position: "absolute", left: 18, top: "50%", transform: "translateY(-50%)", fontSize: 15, color: "rgba(255,255,255,.3)", pointerEvents: "none", fontFamily: "Inter, system-ui" }}>
+                    {p.currency.symbol.trim()}
                   </span>
+                  <input type="number" min="0" className="fk-input"
+                    value={budget}
+                    onChange={e => { setBudget(e.target.value); if (bErr) setBErr(""); }}
+                    onKeyDown={e => e.key === "Enter" && handleRoute()}
+                    placeholder={p.currency.code === "PKR" ? "1500" : "25"}
+                    style={{ paddingLeft: p.currency.symbol.trim().length > 1 ? 52 : 32, borderColor: bErr ? "rgba(239,68,68,.5)" : undefined }}
+                  />
                 </div>
+                {bErr && <p style={{ fontSize: 12, color: "#f87171", marginTop: 6 }}>{bErr}</p>}
               </div>
+
+              <button className="fk-btn" onClick={handleRoute}
+                style={{
+                  width: "100%", padding: "17px 24px", fontSize: 15, fontWeight: 800, color: "#fff",
+                  background: "linear-gradient(135deg, #0891b2, #6366f1)",
+                  boxShadow: "0 4px 32px rgba(6,182,212,.3), 0 0 0 1px rgba(6,182,212,.2)",
+                  letterSpacing: "-.01em",
+                }}>
+                ⚡ Find Direct Channel — Bypass Markup
+              </button>
+
+              <p className="fk-mono" style={{ textAlign: "center", fontSize: 10, color: "rgba(100,116,139,.35)", marginTop: 14 }}>
+                Powered by Groq · Aquarius OS routing engine
+              </p>
             </div>
           </div>
         )}
 
-        {/* ══════════════════ ROUTING (processing) ══════════════════ */}
+        {/* ══════════ ROUTING ══════════ */}
         {s.step === "routing" && (
-          <div className="fade-up flex flex-col gap-5">
-            <div className="rounded-xl border border-cyan-500/20 bg-[#0b0c12] overflow-hidden">
-              <div className="flex items-center gap-2.5 px-5 py-3 border-b border-cyan-500/10">
-                <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-ping" />
-                <span className="font-mono text-[10px] text-cyan-400 tracking-widest uppercase">// ROUTING ENGINE ACTIVE</span>
+          <div className="fk-in" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Big status */}
+            <div className="fk-card" style={{ padding: "36px 28px", textAlign: "center" }}>
+              {/* Spinner ring */}
+              <div style={{ position: "relative", width: 72, height: 72, margin: "0 auto 24px" }}>
+                <svg width="72" height="72" viewBox="0 0 72 72" className="fk-spin" style={{ position: "absolute", inset: 0 }}>
+                  <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(6,182,212,.08)" strokeWidth="4"/>
+                  <circle cx="36" cy="36" r="30" fill="none" stroke="url(#cg)" strokeWidth="4" strokeDasharray="60 130" strokeLinecap="round"/>
+                  <defs><linearGradient id="cg" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stopColor="#06b6d4"/><stop offset="100%" stopColor="#6366f1"/></linearGradient></defs>
+                </svg>
+                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>{p.icon}</div>
               </div>
 
-              <div className="p-5 flex flex-col gap-4">
-                {/* Query echo */}
-                <div className="rounded-lg bg-[#08090e] border border-zinc-800/50 px-4 py-3">
-                  <p className="font-mono text-[9px] text-zinc-600 mb-1 tracking-wider">QUERY RECEIVED</p>
-                  <p className="font-mono text-xs text-zinc-300">
-                    <span className="text-cyan-500">→</span> {s.foodQuery}
-                    <span className="ml-3 text-zinc-600">|</span>
-                    <span className="ml-3 text-zinc-400">{fmt(Number(s.budget), s.platform)} {p.currency.code}</span>
-                    <span className="ml-3 text-zinc-600">|</span>
-                    <span className={`ml-3 font-bold text-[10px] ${p.accent.text}`}>{p.label}</span>
-                  </p>
-                </div>
+              <p style={{ fontSize: 18, fontWeight: 800, color: "#f1f5f9", marginBottom: 6 }}>Routing your order…</p>
+              <p style={{ fontSize: 13, color: "rgba(100,116,139,.6)" }}>Bypassing {p.label} markup ({p.markupPct}%)</p>
 
-                {/* Telemetry */}
-                <div className="flex flex-col gap-2.5">
-                  {s.scanLines.map((line, i) => (
-                    <div key={i} className={`flex items-center gap-3 fade-up font-mono text-xs ${line.startsWith("✅") ? "text-emerald-400" : "text-zinc-400"}`}>
-                      <span className={`h-[5px] w-[5px] rounded-[1px] shrink-0 ${line.startsWith("✅") ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]" : "bg-cyan-500 shadow-[0_0_6px_rgba(6,182,212,0.5)]"}`} />
-                      {line.replace("✅ ", "")}
-                    </div>
-                  ))}
-                  {s.scanLines.length < ROUTE_LINES.length && (
-                    <div className="flex items-center gap-3 font-mono text-xs text-zinc-700">
-                      <div className="h-[5px] w-[5px] rounded-[1px] bg-zinc-700 shrink-0 animate-pulse" />
-                      Bypassing Platform Markups …
-                    </div>
-                  )}
-                </div>
+              {/* Progress bar */}
+              <div style={{ margin: "20px 0 0", height: 3, borderRadius: 99, background: "rgba(255,255,255,.06)", overflow: "hidden" }}>
+                <div style={{
+                  height: "100%", borderRadius: 99,
+                  background: "linear-gradient(90deg,#06b6d4,#6366f1)",
+                  width: `${Math.min(100, (s.scanLines / ROUTE_LINES.length) * 100)}%`,
+                  transition: "width .6s cubic-bezier(.16,1,.3,1)",
+                }} />
               </div>
+            </div>
+
+            {/* Telemetry log */}
+            <div className="fk-card" style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <p className="fk-mono" style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".16em", color: "rgba(100,116,139,.4)", textTransform: "uppercase", marginBottom: 4 }}>// Engine log</p>
+              {ROUTE_LINES.slice(0, s.scanLines).map((line, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, animation: "fk-in .3s both" }}>
+                  <svg width="14" height="14" viewBox="0 0 14 14" style={{ flexShrink: 0 }}>
+                    <circle cx="7" cy="7" r="6" fill="rgba(34,197,94,.1)" stroke="rgba(34,197,94,.4)" strokeWidth="1"/>
+                    <path d="M4.5 7l1.8 1.8 3-3.6" stroke="#4ade80" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  <span className="fk-mono" style={{ fontSize: 11.5, color: "#94a3b8" }}>{line}</span>
+                </div>
+              ))}
+              {s.scanLines < ROUTE_LINES.length && (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 14, height: 14, borderRadius: "50%", border: "1.5px solid rgba(6,182,212,.3)", borderTopColor: "#06b6d4", animation: "fk-spin .8s linear infinite", flexShrink: 0 }} />
+                  <span className="fk-mono" style={{ fontSize: 11.5, color: "rgba(100,116,139,.5)" }}>{ROUTE_LINES[s.scanLines] ?? "Processing…"}</span>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* ══════════════════ RESULT ══════════════════ */}
+        {/* ══════════ RESULT ══════════ */}
         {s.step === "result" && s.result && (
-          <div className="fade-up flex flex-col gap-4">
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-            {/* Platform badge */}
-            <div className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border ${p.accent.border} ${p.accent.bg}`}>
-              <span className={`h-[5px] w-[5px] rounded-[1px] shrink-0 ${p.accent.text.replace("text-", "bg-")}`} />
-              <span className={`text-sm font-black ${p.accent.text}`}>{p.label}</span>
-              <span className="text-xs text-zinc-600 font-mono ml-auto">ROUTE LOCKED</span>
-            </div>
-
-            {/* Savings block */}
-            <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.05] p-6 text-center">
-              <p className="font-mono text-[9px] text-emerald-400/60 tracking-[0.2em] uppercase mb-1">MIDDLEMAN SURCHARGE SAVED</p>
-              <p className="text-5xl font-black text-emerald-400 tabular-nums my-3">
+            {/* ── Hero savings card ── */}
+            <div className="fk-result-appear" style={{
+              borderRadius: 24, padding: "36px 28px 28px",
+              background: "linear-gradient(135deg, rgba(4,120,87,.18) 0%, rgba(6,78,59,.12) 50%, rgba(4,120,87,.08) 100%)",
+              border: "1px solid rgba(52,211,153,.2)",
+              boxShadow: "0 0 0 1px rgba(52,211,153,.06), 0 32px 64px rgba(0,0,0,.4)",
+              textAlign: "center", position: "relative", overflow: "hidden",
+            }}>
+              <div style={{ position: "absolute", top: -60, left: "50%", transform: "translateX(-50%)", width: 300, height: 200, borderRadius: "50%", background: "radial-gradient(ellipse, rgba(52,211,153,.12) 0%, transparent 70%)", pointerEvents: "none" }} />
+              <div className="fk-tag" style={{ color: "#34d399", borderColor: "rgba(52,211,153,.25)", background: "rgba(52,211,153,.08)", marginBottom: 18, display: "inline-flex" }}>
+                <svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="#34d399"/></svg>
+                Route locked · Direct channel verified
+              </div>
+              <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(52,211,153,.6)", letterSpacing: ".04em", textTransform: "uppercase", marginBottom: 8 }}>You save</p>
+              <p style={{ fontSize: "clamp(52px,14vw,72px)", fontWeight: 900, letterSpacing: "-.04em", color: "#34d399", lineHeight: 1, marginBottom: 10, textShadow: "0 0 40px rgba(52,211,153,.4)" }}>
                 {fmt(s.result.fee_amount ?? 0, s.platform)}
               </p>
-              <p className="text-xs text-zinc-500 font-mono">
-                ~{s.result.markup_pct ?? 0}% platform markup removed from your{" "}
-                <span className="text-white font-bold">{fmt(s.result.budget ?? Number(s.budget), s.platform)}</span> budget
+              <p style={{ fontSize: 14, color: "rgba(148,163,184,.6)" }}>
+                {s.result.markup_pct ?? 0}% {p.label} markup on your{" "}
+                <span style={{ color: "#f1f5f9", fontWeight: 700 }}>{fmt(s.result.budget ?? +budget, s.platform)}</span> budget
               </p>
-              <p className={`mt-2 text-[10px] font-mono font-bold ${p.accent.text}`}>
-                DIRECT COST: {fmt(s.result.direct_cost ?? 0, s.platform)}
-              </p>
+              <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid rgba(52,211,153,.1)", display: "flex", justifyContent: "center", gap: 28 }}>
+                <div>
+                  <p className="fk-mono" style={{ fontSize: 9, color: "rgba(100,116,139,.5)", letterSpacing: ".12em", marginBottom: 3 }}>DIRECT COST</p>
+                  <p style={{ fontSize: 20, fontWeight: 800, color: "#f1f5f9" }}>{fmt(s.result.direct_cost ?? 0, s.platform)}</p>
+                </div>
+                <div style={{ width: 1, background: "rgba(255,255,255,.06)" }} />
+                <div>
+                  <p className="fk-mono" style={{ fontSize: 9, color: "rgba(100,116,139,.5)", letterSpacing: ".12em", marginBottom: 3 }}>PLATFORM</p>
+                  <p style={{ fontSize: 20, fontWeight: 800, color: p.color.primary }}>{p.label}</p>
+                </div>
+              </div>
             </div>
 
-            {/* Restaurant + direct link */}
-            <div className="rounded-xl border border-zinc-800/70 bg-[#0b0c12] overflow-hidden">
-              <div className="px-5 py-3 border-b border-zinc-800/50">
-                <p className="font-mono text-[9px] text-zinc-500 tracking-[0.18em] uppercase">// TARGET CHANNEL</p>
-              </div>
-              <div className="p-5 flex flex-col gap-4">
-                <div>
-                  <p className="font-mono text-[9px] text-zinc-600 mb-1">RESTAURANT</p>
-                  <p className="text-lg font-black text-white tracking-tight">{s.result.restaurant_name}</p>
+            {/* ── Restaurant card ── */}
+            <div className="fk-card fk-result-appear" style={{ padding: "24px", animationDelay: ".06s" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+                <div style={{ width: 52, height: 52, borderRadius: 16, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+                  🍽️
                 </div>
+                <div style={{ flex: 1 }}>
+                  <p className="fk-mono" style={{ fontSize: 9, color: "rgba(100,116,139,.5)", letterSpacing: ".14em", marginBottom: 4 }}>DIRECT CHANNEL</p>
+                  <p style={{ fontSize: 20, fontWeight: 800, color: "#f1f5f9", letterSpacing: "-.02em" }}>{s.result.restaurant_name}</p>
+                </div>
+              </div>
 
-                {/* Primary CTA — direct website */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* Direct website */}
                 {s.result.direct_url && (
                   <a href={s.result.direct_url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center justify-between w-full px-5 py-4 rounded-xl bg-gradient-to-r from-cyan-500/10 to-indigo-500/10 border border-cyan-500/30 hover:border-cyan-400/50 hover:shadow-[0_0_20px_rgba(6,182,212,0.12)] active:scale-[0.98] transition-all">
+                    className="fk-btn"
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "16px 20px", borderRadius: 14, textDecoration: "none",
+                      background: "linear-gradient(135deg, rgba(6,182,212,.12), rgba(99,102,241,.12))",
+                      border: "1px solid rgba(6,182,212,.25)",
+                      boxShadow: "0 0 20px rgba(6,182,212,.06)",
+                    }}>
                     <div>
-                      <p className="font-mono text-[9px] text-cyan-400/70 tracking-wider mb-0.5">DIRECT MERCHANT URL</p>
-                      <p className="text-sm font-bold text-white truncate max-w-[220px]">{s.result.direct_url.replace(/^https?:\/\/(www\.)?/, "")}</p>
+                      <p className="fk-mono" style={{ fontSize: 9, color: "rgba(6,182,212,.6)", letterSpacing: ".12em", marginBottom: 3 }}>OFFICIAL WEBSITE</p>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0" }}>
+                        {s.result.direct_url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+                      </p>
                     </div>
-                    <span className="font-mono text-[10px] text-cyan-400 tracking-wide shrink-0">OPEN →</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#22d3ee", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
+                      Order direct
+                      <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                      </svg>
+                    </div>
                   </a>
                 )}
 
-                {/* Fallback — Google Maps */}
+                {/* Maps */}
                 <a href={s.result.google_maps_url} target="_blank" rel="noopener noreferrer"
-                  className={`flex items-center justify-between w-full px-5 py-4 rounded-xl border transition-all active:scale-[0.98] ${
-                    s.result.direct_url
-                      ? "border-zinc-700/50 hover:border-zinc-600 bg-transparent"
-                      : "border-cyan-500/30 hover:border-cyan-400/50 bg-gradient-to-r from-cyan-500/10 to-indigo-500/10"
-                  }`}>
+                  className="fk-btn"
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "14px 20px", borderRadius: 14, textDecoration: "none",
+                    background: "rgba(255,255,255,.025)", border: "1px solid rgba(255,255,255,.07)",
+                  }}>
                   <div>
-                    <p className="font-mono text-[9px] text-zinc-500 tracking-wider mb-0.5">
-                      {s.result.direct_url ? "MAPS SEARCH" : "DIRECT CHANNEL (MAPS)"}
-                    </p>
-                    <p className="text-sm font-bold text-zinc-300">Find on Google Maps</p>
+                    <p className="fk-mono" style={{ fontSize: 9, color: "rgba(100,116,139,.5)", letterSpacing: ".12em", marginBottom: 3 }}>GOOGLE MAPS</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8" }}>Find nearest location</p>
                   </div>
-                  <span className="font-mono text-[10px] text-zinc-500 tracking-wide">→</span>
+                  <svg width="14" height="14" fill="none" stroke="rgba(100,116,139,.5)" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                  </svg>
                 </a>
               </div>
             </div>
 
-            {/* Routing summary */}
-            <div className="rounded-xl bg-[#0b0c12] border border-zinc-800/50 px-5 py-4">
-              <p className="font-mono text-[9px] text-zinc-600 tracking-widest mb-2">// ROUTING SUMMARY</p>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-                {[
-                  ["QUERY",    s.result.query],
-                  ["PLATFORM", p.label],
-                  ["BUDGET",   fmt(s.result.budget ?? Number(s.budget), s.platform)],
-                  ["SAVED",    fmt(s.result.fee_amount ?? 0, s.platform)],
-                ].map(([k, v]) => (
-                  <div key={k}>
-                    <p className="font-mono text-[8px] text-zinc-700 tracking-widest">{k}</p>
-                    <p className="font-mono text-xs text-zinc-300 truncate">{v}</p>
-                  </div>
-                ))}
+            {/* ── Account nudge ── */}
+            <div className="fk-result-appear" style={{
+              borderRadius: 20, padding: "22px 24px", animationDelay: ".12s",
+              background: "rgba(99,102,241,.06)", border: "1px solid rgba(99,102,241,.18)",
+              display: "flex", alignItems: "center", gap: 16,
+            }}>
+              <div style={{ width: 44, height: 44, borderRadius: 13, background: "linear-gradient(135deg,#6366f1,#a855f7)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>✦</div>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9", marginBottom: 2 }}>Save your routing history</p>
+                <p style={{ fontSize: 12, color: "rgba(100,116,139,.6)" }}>Free account · Apex OS unified login</p>
               </div>
-            </div>
-
-            {/* Sign-in nudge */}
-            <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/[0.04] p-5">
-              <p className="font-mono text-[9px] text-zinc-500 tracking-widest mb-1">// PERSIST SESSION</p>
-              <p className="text-sm font-black text-white mb-3">Save your routing history with a free account.</p>
-              <a href="/login"
-                className="flex items-center justify-center w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 text-white font-black text-sm shadow-lg active:scale-[0.98] transition-transform">
-                Create Account → Free
+              <a href="/login" className="fk-btn"
+                style={{ padding: "10px 18px", fontSize: 13, fontWeight: 700, color: "#fff", background: "linear-gradient(135deg,#6366f1,#a855f7)", borderRadius: 12, textDecoration: "none", flexShrink: 0, display: "block" }}>
+                Sign up →
               </a>
             </div>
 
-            {/* Retry */}
-            <button
-              onClick={() => {
-                dispatch({ type: "BACK_INPUT" });
-                setQuery(s.foodQuery);
-                setBudget(String(s.budget));
-              }}
-              className="w-full py-4 rounded-xl border border-zinc-800/60 bg-zinc-900/30 text-zinc-400 text-sm font-mono active:scale-[0.98] transition-transform hover:border-zinc-700">
+            {/* ── Retry ── */}
+            <button className="fk-btn" onClick={() => { dispatch({ type: "BACK_INPUT" }); setQuery(s.foodQuery); setBudget(String(s.budget)); }}
+              style={{ width: "100%", padding: "15px", fontSize: 14, fontWeight: 700, color: "rgba(100,116,139,.7)", background: "rgba(255,255,255,.025)", border: "1px solid rgba(255,255,255,.06)", animationDelay: ".18s" }}
+              className="fk-btn fk-result-appear">
               ← Route another query
             </button>
           </div>
         )}
 
-        {/* ══════════════════ ERROR ══════════════════ */}
+        {/* ══════════ ERROR ══════════ */}
         {s.step === "error" && (
-          <div className="fade-up flex flex-col gap-5">
-            <div className="rounded-xl border border-red-500/20 bg-red-500/[0.04] p-6 text-center">
-              <p className="font-mono text-[9px] text-red-400/70 tracking-widest mb-3">// ROUTING ENGINE ERROR</p>
-              <p className="text-sm text-red-400 leading-relaxed">{s.errorMsg}</p>
+          <div className="fk-in" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ borderRadius: 20, padding: "32px 24px", background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.18)", textAlign: "center" }}>
+              <div style={{ fontSize: 36, marginBottom: 16 }}>⚠️</div>
+              <p className="fk-mono" style={{ fontSize: 9, letterSpacing: ".16em", color: "rgba(248,113,113,.6)", textTransform: "uppercase", marginBottom: 8 }}>Routing error</p>
+              <p style={{ fontSize: 14, color: "#fca5a5", lineHeight: 1.6 }}>{s.errorMsg}</p>
             </div>
-            <button onClick={() => dispatch({ type: "BACK_INPUT" })}
-              className="w-full py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 text-white font-black text-base active:scale-[0.98] transition-transform">
+            <button className="fk-btn" onClick={() => dispatch({ type: "BACK_INPUT" })}
+              style={{ width: "100%", padding: "17px", fontSize: 15, fontWeight: 800, color: "#fff", background: "linear-gradient(135deg,#0891b2,#6366f1)", boxShadow: "0 4px 24px rgba(6,182,212,.25)" }}>
               ← Try Again
             </button>
           </div>
         )}
 
-        <p className="mt-16 text-center font-mono text-[9px] text-zinc-800 uppercase tracking-widest">
-          FeeKiller.ai · DoorDash · Uber Eats · foodpanda · Aquarius OS ✓
+        <p className="fk-mono" style={{ textAlign: "center", fontSize: 9, color: "rgba(30,41,59,.8)", marginTop: 64, letterSpacing: ".14em", textTransform: "uppercase" }}>
+          FeeKiller.ai · Aquarius OS · Apex OS ✦
         </p>
       </div>
     </div>
