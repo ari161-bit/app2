@@ -1,15 +1,14 @@
 /**
  * app/api/afai/route/route.js
  * Aquarius OS · FeeKiller.ai · Budget Router Engine
- *
- * Accepts a food query + budget, calls Groq text inference,
- * and returns the closest real restaurant + direct URL + fee savings estimate.
  */
 
 export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 
-// ─── Markup rates per platform ────────────────────────────────────────────────
+// Use env vars set in .env.local — falls back to Groq defaults
+const GROQ_API_URL = process.env.VISION_API_URL ?? "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_MODEL   = process.env.VISION_MODEL   ?? "meta-llama/llama-4-scout-17b-16e-instruct";
 
 const MARKUP_RATES = {
   doordash:  0.29,
@@ -17,130 +16,121 @@ const MARKUP_RATES = {
   foodpanda: 0.32,
 };
 
-// ─── Dev stubs (no API key) ───────────────────────────────────────────────────
-
 const DEV_STUBS = {
-  doordash: {
-    restaurant_name: "Chipotle Mexican Grill",
-    estimated_price: null, // filled from budget
-    direct_url:      "https://www.chipotle.com",
-    google_maps_url: null,
-  },
-  ubereats: {
-    restaurant_name: "Five Guys",
-    estimated_price: null,
-    direct_url:      "https://www.fiveguys.com",
-    google_maps_url: null,
-  },
-  foodpanda: {
-    restaurant_name: "Savour Foods",
-    estimated_price: null,
-    direct_url:      null,
-    google_maps_url: null,
-  },
+  doordash:  { restaurant_name: "Chipotle Mexican Grill", branch_label: null, direct_url: "https://www.chipotle.com" },
+  ubereats:  { restaurant_name: "Five Guys",              branch_label: null, direct_url: "https://www.fiveguys.com" },
+  foodpanda: { restaurant_name: "Savour Foods",           branch_label: "Gulshan-e-Iqbal", direct_url: null },
 };
 
 function devStub(platform, budget) {
   const base       = DEV_STUBS[platform] ?? DEV_STUBS.doordash;
   const markupRate = MARKUP_RATES[platform] ?? 0.28;
-  const cost       = Math.round(budget * 0.72 * 100) / 100;
-  const mapsQuery  = encodeURIComponent(`${base.restaurant_name} near me`);
   return {
     restaurant_name: base.restaurant_name,
-    estimated_price: cost,
+    branch_label:    base.branch_label,
+    estimated_price: Math.round(budget * (1 - markupRate) * 100) / 100,
     direct_url:      base.direct_url,
-    google_maps_url: base.google_maps_url ?? `https://www.google.com/maps/search/${mapsQuery}`,
     markup_saved:    markupRate,
   };
 }
 
-// ─── Groq text inference ──────────────────────────────────────────────────────
-
-async function callGroqText(query, budget, platform, currency, userArea) {
+async function callGroq(query, budget, platform, currency, userArea) {
   const apiKey = process.env.VISION_API_KEY;
   if (!apiKey) return null;
 
   const markupRate = MARKUP_RATES[platform] ?? 0.28;
   const regionHint =
-    platform === "foodpanda" ? "Pakistan (Lahore/Karachi)" :
-    platform === "doordash"  ? "United States"            : "Global";
+    platform === "foodpanda" ? "Pakistan (Karachi / Lahore / Islamabad)" :
+    platform === "doordash"  ? "United States"                           : "Global";
 
-  const locationClause = userArea
-    ? `The user is located at or near: "${userArea}". Find a restaurant that can deliver to or is close to that area.`
-    : `The user is in ${regionHint}.`;
+  const systemMsg =
+    `You are a restaurant intelligence engine for FeeKiller.ai. ` +
+    `Match the food query to the single best real, well-known restaurant for the user's location. ` +
+    `Return ONLY a valid JSON object — no markdown fences, no explanation, no text outside the braces.`;
 
-  const prompt =
-    `You are a restaurant finder AI for FeeKiller.ai. ` +
-    `${locationClause} ` +
-    `They want to eat: "${query}" with a budget of ${budget} ${currency}. ` +
-    `Return ONLY valid JSON with exactly these keys: ` +
-    `"restaurant_name" (string — a real, well-known restaurant that serves this food near the user's location), ` +
-    `"estimated_price" (number — realistic price in ${currency} for one serving), ` +
-    `"direct_url" (string or null — the restaurant's official website URL; null if not confident it exists), ` +
-    `"google_maps_url" (string — a Google Maps directions URL: https://www.google.com/maps/dir/${userArea ? encodeURIComponent(userArea) + "/" : ""}RESTAURANT+NAME+near+me), ` +
-    `"branch_label" (string or null — the specific branch/location name closest to the user, e.g. "DHA Phase 4 Branch"), ` +
-    `"markup_saved" (number — the delivery app markup rate as a decimal, e.g. ${markupRate}). ` +
-    `Only include a direct_url if you are highly confident the URL is real and currently live. ` +
-    `JSON only. No explanation.`;
+  const pkVendors =
+    `KFC, McDonald's, Pizza Hut, Domino's, Subway, Hardees, Nando's, Savour Foods, ` +
+    `Kababjees, Burger Lab, Student Biryani, Burning Brownie, Kolachi, Chinese Wok, Howdy`;
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization:  `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
+  const directUrlHints =
+    platform === "foodpanda"
+      ? `kfc.com.pk, mcdonalds.com.pk, pizzahut.com.pk, hardees.com.pk, nandos.com.pk, dominos.com.pk`
+      : platform === "doordash"
+      ? `chipotle.com, fiveguys.com, subway.com, dominos.com, pizzahut.com`
+      : `mcdonalds.com, kfc.com, subway.com, pizzahut.com, dominos.com`;
+
+  const userMsg =
+    `Food query: "${query}"\n` +
+    `Budget: ${budget} ${currency}\n` +
+    `Platform: ${platform}\n` +
+    (userArea ? `Delivery area: "${userArea}"\n` : `Region: ${regionHint}\n`) +
+    `\nReturn exactly this JSON (no other text):\n` +
+    `{\n` +
+    `  "restaurant_name": "<real well-known restaurant>",\n` +
+    `  "branch_label": "<specific branch near ${userArea ?? regionHint}, e.g. 'DHA Phase 4' or null>",\n` +
+    `  "estimated_price": <realistic one-order price in ${currency}>,\n` +
+    `  "direct_url": "<official website or null>",\n` +
+    `  "markup_saved": ${markupRate}\n` +
+    `}\n\n` +
+    `Constraints:\n` +
+    (platform === "foodpanda"
+      ? `- restaurant_name MUST be one of these real PK chains if it fits the query: ${pkVendors}\n`
+      : `- restaurant_name must be a real, operational restaurant near the user's area\n`) +
+    `- direct_url: only include if highly confident it's live. Known safe domains: ${directUrlHints}. Otherwise null.\n` +
+    `- estimated_price realistic range: ${currency === "PKR" ? "PKR 350–2500" : "$8–45"}\n` +
+    `- branch_label: nearest specific location to the delivery area, or null if unknown`;
+
+  const response = await fetch(GROQ_API_URL, {
+    method:  "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model:      "llama3-8b-8192",
-      max_tokens: 256,
-      messages:   [{ role: "user", content: prompt }],
+      model:       GROQ_MODEL,
+      max_tokens:  420,
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: systemMsg },
+        { role: "user",   content: userMsg   },
+      ],
     }),
   });
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Groq text API error ${response.status}: ${err}`);
+    throw new Error(`Groq ${response.status}: ${err.slice(0, 200)}`);
   }
 
   const data  = await response.json();
   const text  = data.choices?.[0]?.message?.content?.trim() ?? "";
   const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("Groq returned non-JSON content.");
+  if (!match) throw new Error(`Groq non-JSON: "${text.slice(0, 120)}"`);
   return JSON.parse(match[0]);
 }
-
-// ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(request) {
   try {
     const body     = await request.json();
-    const query    = (body.query ?? "").trim();
+    const query    = (body.query    ?? "").trim();
     const budget   = Number(body.budget) || 0;
     const platform = (body.platform ?? "doordash").toLowerCase();
     const currency = body.currency ?? "USD";
     const userArea = (body.userArea ?? "").trim() || null;
 
-    if (!query)   return NextResponse.json({ error: "query is required."   }, { status: 400 });
-    if (!budget)  return NextResponse.json({ error: "budget is required."  }, { status: 400 });
+    if (!query)  return NextResponse.json({ error: "query is required."  }, { status: 400 });
+    if (!budget) return NextResponse.json({ error: "budget is required." }, { status: 400 });
 
     let result;
     try {
-      result = await callGroqText(query, budget, platform, currency, userArea);
+      result = await callGroq(query, budget, platform, currency, userArea);
       if (!result) result = devStub(platform, budget);
     } catch (err) {
-      console.error("[AFAI/route] Groq failed:", err.message, "— using dev stub");
+      console.error("[AFAI/route] Groq failed:", err.message, "— using stub");
       result = devStub(platform, budget);
     }
 
-    // Ensure markup_saved is set
     if (!result.markup_saved) result.markup_saved = MARKUP_RATES[platform] ?? 0.28;
 
-    // Compute fee amounts from budget
-    const feeAmount   = Math.round(budget * result.markup_saved * 100) / 100;
-    const directCost  = Math.round((budget - feeAmount) * 100) / 100;
-
-    const mapsBase = userArea
-      ? `https://www.google.com/maps/dir/${encodeURIComponent(userArea)}/${encodeURIComponent(result.restaurant_name)}`
-      : `https://www.google.com/maps/search/${encodeURIComponent(result.restaurant_name + " near me")}`;
+    const feeAmount  = Math.round(budget * result.markup_saved * 100) / 100;
+    const directCost = Math.round((budget - feeAmount) * 100) / 100;
 
     return NextResponse.json({
       analyzed_at:     new Date().toISOString(),
@@ -150,17 +140,16 @@ export async function POST(request) {
       currency,
       user_area:       userArea,
       restaurant_name: result.restaurant_name,
-      branch_label:    result.branch_label ?? null,
+      branch_label:    result.branch_label    ?? null,
       estimated_price: result.estimated_price ?? directCost,
-      direct_url:      result.direct_url  ?? null,
-      google_maps_url: result.google_maps_url ?? mapsBase,
+      direct_url:      result.direct_url      ?? null,
       fee_amount:      feeAmount,
       direct_cost:     directCost,
       markup_pct:      Math.round(result.markup_saved * 100),
     });
 
   } catch (err) {
-    console.error("[AFAI/route] Unhandled error:", err);
+    console.error("[AFAI/route] Unhandled:", err);
     return NextResponse.json({ error: "Internal routing engine error." }, { status: 500 });
   }
 }
