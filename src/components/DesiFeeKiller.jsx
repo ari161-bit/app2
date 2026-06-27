@@ -7,9 +7,11 @@
  */
 
 import { useState, useRef } from "react";
-import { useGeolocation }      from "../hooks/useGeoDistance.js";
-import { formatAddress, buildMapsUrl } from "../services/locationService.js";
-import { resolveNearestBranch }        from "../services/foodpandaScraper.js";
+import { useGeolocation }                    from "../hooks/useGeoDistance.js";
+import { formatAddress }                     from "../services/locationService.js";
+import { resolveNearestBranch }              from "../services/foodpandaScraper.js";
+import CityDropdown                          from "./CityDropdown.jsx";
+import { getCityNode, matchCityFromString }  from "../config/regionalNodes.js";
 
 // ─── Platform config ──────────────────────────────────────────────────────────
 
@@ -30,6 +32,7 @@ function fmtCurrency(amount, pk) {
 export default function DesiFeeKiller() {
   const [platform, setPlatform]           = useState(null);
   const [foodQuery, setFoodQuery]          = useState("");
+  const [selectedCity, setSelectedCity]   = useState("");   // city id from dropdown
   const [userArea, setUserArea]            = useState("");
   const [budget, setBudget]               = useState("");
   const [isProcessing, setIsProcessing]   = useState(false);
@@ -72,12 +75,26 @@ export default function DesiFeeKiller() {
     setError(null);
     setLogLines([]);
 
-    const formattedArea = formatAddress(userArea, platform);
+    // Resolve city node — prefer GPS match, then dropdown, then text match
+    const cityNode = getCityNode(platform, selectedCity)
+      ?? matchCityFromString(platform, userArea);
+
+    // Build formatted area string: combine city label + sub-locality if provided
+    const areaText = userArea.trim();
+    const cityLabel = cityNode?.label ?? null;
+    const formattedArea = areaText
+      ? (cityLabel && !areaText.toLowerCase().includes(cityLabel.toLowerCase().split(",")[0])
+          ? `${areaText}, ${cityLabel}`
+          : areaText)
+      : (cityLabel ?? null);
+
+    // Effective coords: GPS first, then city centroid
+    const effectiveCoords = geo.coords ?? (cityNode ? { lat: cityNode.lat, lng: cityNode.lng } : null);
 
     const LOG_STEPS = [
       "Isolating platform markup layer …",
-      formattedArea ? `Resolving location: ${formattedArea} …` : "Querying direct merchant registry …",
-      "Calculating zero-surcharge delta …",
+      cityNode ? `City node locked: ${cityNode.label} …` : "Querying direct merchant registry …",
+      formattedArea ? `Resolving sub-locality: ${areaText || cityLabel} …` : "Calculating zero-surcharge delta …",
       "Verifying live merchant URL …",
     ];
 
@@ -105,9 +122,9 @@ export default function DesiFeeKiller() {
 
     const result = await res.json();
 
-    // Attempt static proximity resolution if we have coords
-    if (geo.coords) {
-      const branch = resolveNearestBranch(result.restaurant_name, geo.coords);
+    // Proximity resolution — GPS or city centroid as fallback
+    if (effectiveCoords) {
+      const branch = resolveNearestBranch(result.restaurant_name, effectiveCoords);
       if (branch) setNearestBranch(branch);
     }
 
@@ -117,7 +134,7 @@ export default function DesiFeeKiller() {
   }
 
   function reset() {
-    setPlatform(null); setFoodQuery(""); setBudget(""); setUserArea("");
+    setPlatform(null); setFoodQuery(""); setBudget(""); setUserArea(""); setSelectedCity("");
     setRoutingResult(null); setNearestBranch(null); setError(null); setLogLines([]);
     geoAreaRef.current = null;
   }
@@ -285,10 +302,20 @@ export default function DesiFeeKiller() {
                     />
                   </div>
 
-                  {/* [01.5] Delivery area */}
+                  {/* [01.5a] City selector */}
+                  <CityDropdown
+                    platform={platform}
+                    value={selectedCity}
+                    onChange={(cityId, subLocality) => {
+                      setSelectedCity(cityId);
+                      if (subLocality) setUserArea(subLocality);
+                    }}
+                  />
+
+                  {/* [01.5b] Delivery sub-locality */}
                   <div>
                     <label className="fk-mono" style={{ display:"block", fontSize:10, fontWeight:700, color:"rgba(100,116,139,.55)", letterSpacing:".15em", textTransform:"uppercase", marginBottom:9 }}>
-                      [01.5] // Your delivery address / area
+                      [01.5b] // Sub-locality / street area
                       <span style={{ marginLeft:8, color:"rgba(100,116,139,.3)", fontWeight:400, letterSpacing:".06em", textTransform:"none" }}>(optional)</span>
                     </label>
                     <div style={{ position:"relative" }}>
@@ -388,7 +415,14 @@ export default function DesiFeeKiller() {
             <div className="fk-pop" style={{ borderRadius:20, padding:"20px 22px", background:"rgba(6,182,212,.04)", border:"1px solid rgba(6,182,212,.18)", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <div>
                 <span className="fk-mono" style={{ fontSize:9, fontWeight:700, letterSpacing:".16em", color:"rgba(34,211,238,.6)", textTransform:"uppercase" }}>// DEEP_EXTRACTION_SUCCESS</span>
-                <p style={{ fontSize:13, fontWeight:700, color:"#22d3ee", marginTop:3 }}>Direct channel locked · 0% markup applied</p>
+                <p style={{ fontSize:13, fontWeight:700, color:"#22d3ee", marginTop:3 }}>
+                  Direct channel locked · 0% markup applied
+                  {getCityNode(platform, selectedCity) && (
+                    <span style={{ fontWeight:500, color:"rgba(34,211,238,.55)", marginLeft:8, fontSize:12 }}>
+                      · {getCityNode(platform, selectedCity).label}
+                    </span>
+                  )}
+                </p>
               </div>
               <span className="fk-tag" style={{ color:"#000", background:"#22d3ee", borderColor:"#22d3ee", flexShrink:0 }}>
                 MATCHED_100%
