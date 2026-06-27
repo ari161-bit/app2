@@ -56,7 +56,7 @@ function devStub(platform, budget) {
 
 // ─── Groq text inference ──────────────────────────────────────────────────────
 
-async function callGroqText(query, budget, platform, currency) {
+async function callGroqText(query, budget, platform, currency, userArea) {
   const apiKey = process.env.VISION_API_KEY;
   if (!apiKey) return null;
 
@@ -65,14 +65,20 @@ async function callGroqText(query, budget, platform, currency) {
     platform === "foodpanda" ? "Pakistan (Lahore/Karachi)" :
     platform === "doordash"  ? "United States"            : "Global";
 
+  const locationClause = userArea
+    ? `The user is located at or near: "${userArea}". Find a restaurant that can deliver to or is close to that area.`
+    : `The user is in ${regionHint}.`;
+
   const prompt =
     `You are a restaurant finder AI for FeeKiller.ai. ` +
-    `A user in ${regionHint} wants to eat: "${query}" with a budget of ${budget} ${currency}. ` +
+    `${locationClause} ` +
+    `They want to eat: "${query}" with a budget of ${budget} ${currency}. ` +
     `Return ONLY valid JSON with exactly these keys: ` +
-    `"restaurant_name" (string — a real, well-known restaurant that serves this food in that region), ` +
+    `"restaurant_name" (string — a real, well-known restaurant that serves this food near the user's location), ` +
     `"estimated_price" (number — realistic price in ${currency} for one serving), ` +
     `"direct_url" (string or null — the restaurant's official website URL; null if not confident it exists), ` +
-    `"google_maps_url" (string — a Google Maps search URL like https://www.google.com/maps/search/RESTAURANT+near+me), ` +
+    `"google_maps_url" (string — a Google Maps directions URL: https://www.google.com/maps/dir/${userArea ? encodeURIComponent(userArea) + "/" : ""}RESTAURANT+NAME+near+me), ` +
+    `"branch_label" (string or null — the specific branch/location name closest to the user, e.g. "DHA Phase 4 Branch"), ` +
     `"markup_saved" (number — the delivery app markup rate as a decimal, e.g. ${markupRate}). ` +
     `Only include a direct_url if you are highly confident the URL is real and currently live. ` +
     `JSON only. No explanation.`;
@@ -111,13 +117,14 @@ export async function POST(request) {
     const budget   = Number(body.budget) || 0;
     const platform = (body.platform ?? "doordash").toLowerCase();
     const currency = body.currency ?? "USD";
+    const userArea = (body.userArea ?? "").trim() || null;
 
     if (!query)   return NextResponse.json({ error: "query is required."   }, { status: 400 });
     if (!budget)  return NextResponse.json({ error: "budget is required."  }, { status: 400 });
 
     let result;
     try {
-      result = await callGroqText(query, budget, platform, currency);
+      result = await callGroqText(query, budget, platform, currency, userArea);
       if (!result) result = devStub(platform, budget);
     } catch (err) {
       console.error("[AFAI/route] Groq failed:", err.message, "— using dev stub");
@@ -131,16 +138,22 @@ export async function POST(request) {
     const feeAmount   = Math.round(budget * result.markup_saved * 100) / 100;
     const directCost  = Math.round((budget - feeAmount) * 100) / 100;
 
+    const mapsBase = userArea
+      ? `https://www.google.com/maps/dir/${encodeURIComponent(userArea)}/${encodeURIComponent(result.restaurant_name)}`
+      : `https://www.google.com/maps/search/${encodeURIComponent(result.restaurant_name + " near me")}`;
+
     return NextResponse.json({
       analyzed_at:     new Date().toISOString(),
       platform,
       query,
       budget,
       currency,
+      user_area:       userArea,
       restaurant_name: result.restaurant_name,
+      branch_label:    result.branch_label ?? null,
       estimated_price: result.estimated_price ?? directCost,
       direct_url:      result.direct_url  ?? null,
-      google_maps_url: result.google_maps_url ?? `https://www.google.com/maps/search/${encodeURIComponent(result.restaurant_name + " near me")}`,
+      google_maps_url: result.google_maps_url ?? mapsBase,
       fee_amount:      feeAmount,
       direct_cost:     directCost,
       markup_pct:      Math.round(result.markup_saved * 100),

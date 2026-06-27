@@ -6,7 +6,10 @@
  * Scaffold: FeeKillerBudgetRouter — fully wired to /api/afai/route
  */
 
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { useGeolocation }      from "../hooks/useGeoDistance.js";
+import { formatAddress, buildMapsUrl } from "../services/locationService.js";
+import { resolveNearestBranch }        from "../services/foodpandaScraper.js";
 
 // ─── Platform config ──────────────────────────────────────────────────────────
 
@@ -25,15 +28,30 @@ function fmtCurrency(amount, pk) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DesiFeeKiller() {
-  const [platform, setPlatform]         = useState(null);       // null = platform picker
-  const [foodQuery, setFoodQuery]        = useState("");
-  const [budget, setBudget]             = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [platform, setPlatform]           = useState(null);
+  const [foodQuery, setFoodQuery]          = useState("");
+  const [userArea, setUserArea]            = useState("");
+  const [budget, setBudget]               = useState("");
+  const [isProcessing, setIsProcessing]   = useState(false);
   const [routingResult, setRoutingResult] = useState(null);
-  const [logLines, setLogLines]          = useState([]);
-  const [error, setError]                = useState(null);
+  const [nearestBranch, setNearestBranch] = useState(null);
+  const [logLines, setLogLines]           = useState([]);
+  const [error, setError]                 = useState(null);
+
+  const geo = useGeolocation();
+  const geoAreaRef = useRef(null);  // stores reverse-geocoded label once coords arrive
 
   const p = platform ? PLATFORMS[platform] : null;
+
+  // When the user clicks "Use my location", request coords and fill the area field
+  function handleGeoRequest() {
+    geo.request();
+  }
+  // Once coords land, populate area field with a lat,lng string (readable by Groq + Maps)
+  if (geo.coords && !userArea && !geoAreaRef.current) {
+    geoAreaRef.current = `${geo.coords.lat.toFixed(4)},${geo.coords.lng.toFixed(4)}`;
+    setUserArea(geoAreaRef.current);
+  }
 
   // ── Log drip helper ──────────────────────────────────────────────────────────
   async function drip(lines) {
@@ -50,12 +68,15 @@ export default function DesiFeeKiller() {
 
     setIsProcessing(true);
     setRoutingResult(null);
+    setNearestBranch(null);
     setError(null);
     setLogLines([]);
 
+    const formattedArea = formatAddress(userArea, platform);
+
     const LOG_STEPS = [
       "Isolating platform markup layer …",
-      "Querying direct merchant registry …",
+      formattedArea ? `Resolving location: ${formattedArea} …` : "Querying direct merchant registry …",
       "Calculating zero-surcharge delta …",
       "Verifying live merchant URL …",
     ];
@@ -65,7 +86,13 @@ export default function DesiFeeKiller() {
       fetch("/api/afai/route", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: foodQuery.trim(), budget: +budget, platform, currency: p.currency }),
+        body: JSON.stringify({
+          query: foodQuery.trim(),
+          budget: +budget,
+          platform,
+          currency: p.currency,
+          userArea: formattedArea,
+        }),
       }),
     ]).catch(() => [null, null]);
 
@@ -77,14 +104,22 @@ export default function DesiFeeKiller() {
     }
 
     const result = await res.json();
+
+    // Attempt static proximity resolution if we have coords
+    if (geo.coords) {
+      const branch = resolveNearestBranch(result.restaurant_name, geo.coords);
+      if (branch) setNearestBranch(branch);
+    }
+
     await new Promise(r => setTimeout(r, 280));
     setIsProcessing(false);
     setRoutingResult(result);
   }
 
   function reset() {
-    setPlatform(null); setFoodQuery(""); setBudget("");
-    setRoutingResult(null); setError(null); setLogLines([]);
+    setPlatform(null); setFoodQuery(""); setBudget(""); setUserArea("");
+    setRoutingResult(null); setNearestBranch(null); setError(null); setLogLines([]);
+    geoAreaRef.current = null;
   }
 
   // ── Styles (injected once) ───────────────────────────────────────────────────
@@ -250,6 +285,39 @@ export default function DesiFeeKiller() {
                     />
                   </div>
 
+                  {/* [01.5] Delivery area */}
+                  <div>
+                    <label className="fk-mono" style={{ display:"block", fontSize:10, fontWeight:700, color:"rgba(100,116,139,.55)", letterSpacing:".15em", textTransform:"uppercase", marginBottom:9 }}>
+                      [01.5] // Your delivery address / area
+                      <span style={{ marginLeft:8, color:"rgba(100,116,139,.3)", fontWeight:400, letterSpacing:".06em", textTransform:"none" }}>(optional)</span>
+                    </label>
+                    <div style={{ position:"relative" }}>
+                      <input type="text" className="fk-input"
+                        placeholder={platform === "foodpanda" ? "e.g. DHA Phase 5, Karachi" : "e.g. Brooklyn, NY or leave blank"}
+                        value={userArea}
+                        onChange={e => setUserArea(e.target.value)}
+                        style={{ paddingRight:46 }}
+                      />
+                      {/* Geo-detect button */}
+                      <button type="button" onClick={handleGeoRequest}
+                        title="Use my current location"
+                        style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"rgba(6,182,212,.1)", border:"1px solid rgba(6,182,212,.2)", borderRadius:8, padding:"5px 8px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all .15s" }}>
+                        {geo.loading
+                          ? <div style={{ width:12, height:12, borderRadius:"50%", border:"1.5px solid rgba(6,182,212,.3)", borderTopColor:"#06b6d4", animation:"fk-spin .75s linear infinite" }}/>
+                          : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2">
+                              <circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/><circle cx="12" cy="12" r="9" strokeOpacity=".25"/>
+                            </svg>
+                        }
+                      </button>
+                    </div>
+                    {geo.error && <p className="fk-mono" style={{ fontSize:10, color:"rgba(239,68,68,.6)", marginTop:5 }}>{geo.error}</p>}
+                    {geo.coords && userArea === geoAreaRef.current && (
+                      <p className="fk-mono" style={{ fontSize:10, color:"rgba(34,211,238,.5)", marginTop:5 }}>
+                        📍 GPS locked · {geo.coords.lat.toFixed(4)}, {geo.coords.lng.toFixed(4)}
+                      </p>
+                    )}
+                  </div>
+
                   {/* [02] Budget */}
                   <div>
                     <label className="fk-mono" style={{ display:"block", fontSize:10, fontWeight:700, color:"rgba(100,116,139,.55)", letterSpacing:".15em", textTransform:"uppercase", marginBottom:9 }}>
@@ -385,18 +453,42 @@ export default function DesiFeeKiller() {
                   </a>
                 )}
 
-                {/* Google Maps */}
-                <a href={routingResult.google_maps_url} target="_blank" rel="noopener noreferrer" className="fk-btn"
-                  style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 18px", borderRadius:14, textDecoration:"none",
-                    background:"rgba(255,255,255,.02)", border:"1px solid rgba(255,255,255,.07)" }}>
-                  <div>
-                    <p className="fk-mono" style={{ fontSize:9, color:"rgba(100,116,139,.4)", letterSpacing:".12em", marginBottom:3 }}>MAPS SEARCH</p>
-                    <p style={{ fontSize:13, fontWeight:600, color:"#94a3b8" }}>Find nearest location</p>
-                  </div>
-                  <svg width="14" height="14" fill="none" stroke="rgba(100,116,139,.4)" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-                  </svg>
-                </a>
+                {/* Maps / Directions — upgraded when branch data available */}
+                {(() => {
+                  const branch   = nearestBranch;
+                  const mapsHref = branch?.mapsDirectionsUrl ?? routingResult.google_maps_url;
+                  const hasDist  = branch?.distanceKm != null;
+                  return (
+                    <a href={mapsHref} target="_blank" rel="noopener noreferrer" className="fk-btn"
+                      style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 18px", borderRadius:14, textDecoration:"none",
+                        background: hasDist ? "rgba(6,182,212,.05)" : "rgba(255,255,255,.02)",
+                        border: hasDist ? "1px solid rgba(6,182,212,.18)" : "1px solid rgba(255,255,255,.07)" }}>
+                      <div>
+                        <p className="fk-mono" style={{ fontSize:9, color: hasDist ? "rgba(6,182,212,.5)" : "rgba(100,116,139,.4)", letterSpacing:".12em", marginBottom:3 }}>
+                          {hasDist ? "NEAREST BRANCH · DIRECTIONS" : "MAPS SEARCH"}
+                        </p>
+                        <p style={{ fontSize:13, fontWeight:700, color: hasDist ? "#e2e8f0" : "#94a3b8" }}>
+                          {branch?.branchLabel
+                            ? `${branch.branchLabel}`
+                            : (routingResult.branch_label ?? "Find nearest location")}
+                        </p>
+                        {hasDist && (
+                          <p className="fk-mono" style={{ fontSize:10, color:"rgba(34,211,238,.55)", marginTop:3 }}>
+                            📍 {branch.distanceKm} km from your location
+                          </p>
+                        )}
+                        {!hasDist && routingResult.user_area && (
+                          <p className="fk-mono" style={{ fontSize:10, color:"rgba(100,116,139,.4)", marginTop:3 }}>
+                            Directions from {routingResult.user_area}
+                          </p>
+                        )}
+                      </div>
+                      <svg width="14" height="14" fill="none" stroke={hasDist ? "#22d3ee" : "rgba(100,116,139,.4)"} strokeWidth="2" viewBox="0 0 24 24" style={{ flexShrink:0 }}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                      </svg>
+                    </a>
+                  );
+                })()}
               </div>
 
               <p className="fk-mono" style={{ textAlign:"center", fontSize:9, color:"rgba(100,116,139,.3)", marginTop:14 }}>
@@ -405,7 +497,7 @@ export default function DesiFeeKiller() {
             </div>
 
             {/* ── Try again ── */}
-            <button className="fk-btn fk-pop" onClick={() => { setRoutingResult(null); setLogLines([]); }}
+            <button className="fk-btn fk-pop" onClick={() => { setRoutingResult(null); setNearestBranch(null); setLogLines([]); }}
               style={{ width:"100%", padding:"15px", fontSize:13, fontWeight:700, color:"rgba(100,116,139,.6)",
                 background:"rgba(255,255,255,.02)", border:"1px solid rgba(255,255,255,.06)", animationDelay:".16s" }}>
               ← Route another query
