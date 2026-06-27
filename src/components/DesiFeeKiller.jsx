@@ -5,11 +5,14 @@
  * Aquarius OS · FeeKiller.ai · Premium Console — Apex OS visual parity
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useGeolocation }                   from "../hooks/useGeoDistance.js";
 import { formatAddress }                    from "../services/locationService.js";
 import { resolveNearestBranch }             from "../services/foodpandaScraper.js";
 import { CITY_NODES, getCityNode, matchCityFromString } from "../config/regionalNodes.js";
+import { supabase }                                     from "../config/supabaseClient.js";
+import AuthPortal                                       from "./AuthPortal.jsx";
+import { generateFoodpandaUrl }                         from "./DealRouter.jsx";
 
 // ─── Platform registry ────────────────────────────────────────────────────────
 
@@ -47,6 +50,13 @@ export default function DesiFeeKiller() {
   const [nearestBranch, setNearestBranch] = useState(null);
   const [logLines,      setLogLines]      = useState([]);
   const [error,         setError]         = useState(null);
+  const [session,       setSession]       = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
+    return () => subscription.unsubscribe();
+  }, []);
 
   const geo        = useGeolocation();
   const geoRef     = useRef(null);
@@ -123,6 +133,19 @@ export default function DesiFeeKiller() {
     setRoutingResult(null); setNearestBranch(null); setLogLines([]); setError(null);
   }
 
+  // Compute the most direct foodpanda URL from the current result + city/vendor state.
+  // nearestBranch.foodpandaUrl wins when the vendor is in our static DB; otherwise
+  // generateFoodpandaUrl() builds a city-scoped search URL.
+  const absoluteFoodpandaUrl = routingResult
+    ? (nearestBranch?.foodpandaUrl ?? generateFoodpandaUrl({
+        restaurantName: routingResult.restaurant_name,
+        foodQuery,
+        platform,
+        cityId:    selectedCity,
+        cityNodes: CITY_NODES[platform],
+      }))
+    : null;
+
   // ─── CSS ──────────────────────────────────────────────────────────────────────
   const CSS = `
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
@@ -196,11 +219,14 @@ export default function DesiFeeKiller() {
             <div style={{ width: 28, height: 28, borderRadius: 9, background: "linear-gradient(135deg,#7c3aed,#6366f1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 900, color: "#fff", boxShadow: "0 0 16px rgba(99,102,241,.35)" }}>A</div>
             <span className="fk-mono" style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".22em", color: "#fff", textTransform: "uppercase" }}>AQUARIUS // ECOSYSTEM</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }} className="fk-mono">
-            <span style={{ fontSize: 9, color: "rgba(100,116,139,.5)", letterSpacing: ".1em" }}>// SYSTEM_NODE:</span>
-            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "#a78bfa", background: "rgba(124,58,237,.1)", border: "1px solid rgba(124,58,237,.25)", borderRadius: 6, padding: "2px 9px" }}>
-              FEEKILLER_V2.0_LIVE
-            </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }} className="fk-mono">
+              <span style={{ fontSize: 9, color: "rgba(100,116,139,.5)", letterSpacing: ".1em" }}>// SYSTEM_NODE:</span>
+              <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "#a78bfa", background: "rgba(124,58,237,.1)", border: "1px solid rgba(124,58,237,.25)", borderRadius: 6, padding: "2px 9px" }}>
+                FEEKILLER_V2.0_LIVE
+              </span>
+            </div>
+            <AuthPortal compact={true} />
           </div>
         </div>
       </header>
@@ -449,36 +475,29 @@ export default function DesiFeeKiller() {
                   </div>
                 </div>
 
-                {/* CTAs */}
+                {/* CTAs — maps layer removed; click routes directly to absoluteFoodpandaUrl */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {routingResult.direct_url && (
-                    <a href={routingResult.direct_url} target="_blank" rel="noopener noreferrer"
-                      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 18px", borderRadius: 12, textDecoration: "none", background: "rgba(6,182,212,.07)", border: "1px solid rgba(6,182,212,.25)", transition: "all .18s" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(6,182,212,.12)"; e.currentTarget.style.borderColor = "rgba(6,182,212,.4)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(6,182,212,.07)"; e.currentTarget.style.borderColor = "rgba(6,182,212,.25)"; }}>
+                  {(absoluteFoodpandaUrl ?? routingResult.direct_url) && (
+                    <a href={absoluteFoodpandaUrl ?? routingResult.direct_url} target="_blank" rel="noopener noreferrer"
+                      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderRadius: 12, textDecoration: "none", background: "rgba(6,182,212,.07)", border: "1px solid rgba(6,182,212,.25)", transition: "all .18s" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(6,182,212,.13)"; e.currentTarget.style.borderColor = "rgba(6,182,212,.45)"; e.currentTarget.style.boxShadow = "0 4px 20px rgba(6,182,212,.1)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(6,182,212,.07)"; e.currentTarget.style.borderColor = "rgba(6,182,212,.25)"; e.currentTarget.style.boxShadow = "none"; }}>
                       <div>
-                        <p className="fk-mono" style={{ fontSize: 8, color: "rgba(6,182,212,.5)", letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 2 }}>Launch official storefront router</p>
-                        <p style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{routingResult.direct_url.replace(/^https?:\/\/(www\.)?/,"").replace(/\/$/,"")}</p>
+                        <p className="fk-mono" style={{ fontSize: 8, color: "rgba(6,182,212,.5)", letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 3 }}>
+                          {platform === "foodpanda" ? "Open official foodpanda storefront — 0% markup" : "Launch official storefront router"}
+                        </p>
+                        <p style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>
+                          {(absoluteFoodpandaUrl ?? routingResult.direct_url).replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+                        </p>
+                        {nearestBranch?.branchLabel && (
+                          <p className="fk-mono" style={{ fontSize: 9, color: "rgba(34,211,238,.5)", marginTop: 4 }}>
+                            📍 {nearestBranch.branchLabel}{nearestBranch.distanceKm ? ` · ${nearestBranch.distanceKm} km away` : ""}
+                          </p>
+                        )}
                       </div>
-                      <span style={{ color: "#22d3ee", fontSize: 12, fontWeight: 700 }}>↗</span>
+                      <span style={{ color: "#22d3ee", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>↗</span>
                     </a>
                   )}
-
-                  <a href={nearestBranch?.mapsDirectionsUrl ?? routingResult.google_maps_url}
-                    target="_blank" rel="noopener noreferrer"
-                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderRadius: 12, textDecoration: "none", background: "rgba(255,255,255,.02)", border: "1px solid rgba(255,255,255,.06)", transition: "all .18s" }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,.05)"; e.currentTarget.style.borderColor = "rgba(255,255,255,.12)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.02)"; e.currentTarget.style.borderColor = "rgba(255,255,255,.06)"; }}>
-                    <div>
-                      <p className="fk-mono" style={{ fontSize: 8, color: "rgba(100,116,139,.4)", letterSpacing: ".12em", textTransform: "uppercase", marginBottom: 2 }}>
-                        {nearestBranch ? "Nearest branch directions" : "Maps search"}
-                      </p>
-                      <p style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8" }}>
-                        {nearestBranch?.branchLabel ?? "Find nearest location"}
-                      </p>
-                    </div>
-                    <span style={{ color: "rgba(100,116,139,.4)", fontSize: 12 }}>↗</span>
-                  </a>
                 </div>
 
                 <p className="fk-mono" style={{ textAlign: "center", fontSize: 8, color: "rgba(100,116,139,.25)", marginTop: 14 }}>
