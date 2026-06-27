@@ -42,6 +42,8 @@ export default function DesiFeeKiller() {
   const [error,         setError]         = useState(null);
   const [session,       setSession]       = useState(null);
   const [progress,      setProgress]      = useState(0);
+  const [liveCrawlUrl,  setLiveCrawlUrl]  = useState(null);
+  const [crawlMethod,   setCrawlMethod]   = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -91,16 +93,21 @@ export default function DesiFeeKiller() {
     const steps = [
       `Parsing: "${foodQuery.trim().slice(0, 32)}${foodQuery.trim().length > 32 ? "…" : ""}"`,
       cityNode ? `City node locked → ${cityNode.label}` : "Resolving regional node…",
-      "Calculating platform markup delta",
+      platform === "foodpanda" ? "Deploying live crawler → foodpanda search node" : "Calculating platform markup delta",
       "Verifying direct vendor channel",
     ];
 
-    // Animate progress to 88% while API runs
+    // Animate progress to 88% while both API calls run
     progId.current = setInterval(() => {
       setProgress(prev => prev < 88 ? prev + 2.5 : prev);
     }, 130);
 
-    const [, res] = await Promise.all([
+    // Run Groq AI route + foodpanda live crawler in parallel
+    const crawlerBody = platform === "foodpanda"
+      ? JSON.stringify({ targetItem: foodQuery.trim(), cityNode: selectedCity || "karachi", deliveryArea: formattedArea })
+      : null;
+
+    const [, res, crawlerRes] = await Promise.all([
       drip(steps),
       fetch("/api/afai/route", {
         method:  "POST",
@@ -110,7 +117,10 @@ export default function DesiFeeKiller() {
           platform, currency: p.currency, userArea: formattedArea,
         }),
       }),
-    ]).catch(() => [null, null]);
+      crawlerBody
+        ? fetch("/api/extractVendorLink", { method: "POST", headers: { "Content-Type": "application/json" }, body: crawlerBody })
+        : Promise.resolve(null),
+    ]).catch(() => [null, null, null]);
 
     clearInterval(progId.current);
     setProgress(100);
@@ -125,6 +135,16 @@ export default function DesiFeeKiller() {
     }
 
     const result = await res.json();
+
+    // Process live crawler result (non-blocking — failure is fine, we have fallbacks)
+    if (crawlerRes?.ok) {
+      const crawlerData = await crawlerRes.json().catch(() => null);
+      if (crawlerData?.success && crawlerData?.directMenuUrl) {
+        setLiveCrawlUrl(crawlerData.directMenuUrl);
+        setCrawlMethod(crawlerData.discoveryMethod ?? "unknown");
+      }
+    }
+
     if (effectiveCoords) {
       const branch = resolveNearestBranch(result.restaurant_name, effectiveCoords);
       if (branch) setNearestBranch(branch);
@@ -139,6 +159,7 @@ export default function DesiFeeKiller() {
   function resetQuery() {
     setRoutingResult(null); setNearestBranch(null);
     setLogLines([]); setError(null); setProgress(0);
+    setLiveCrawlUrl(null); setCrawlMethod(null);
   }
 
   const absoluteFoodpandaUrl = routingResult
@@ -148,8 +169,24 @@ export default function DesiFeeKiller() {
       }))
     : null;
 
-  const isKnownVendor = !!nearestBranch?.foodpandaUrl;
-  const finalUrl      = absoluteFoodpandaUrl ?? routingResult?.direct_url ?? null;
+  const isKnownVendor    = !!nearestBranch?.foodpandaUrl;
+  const isLiveCrawled    = !!liveCrawlUrl && crawlMethod !== "fallback_search_url";
+  const isSearchFallback = crawlMethod === "fallback_search_url";
+
+  // Priority: live crawl > static slug > Groq direct_url
+  const finalUrl = liveCrawlUrl
+    ?? absoluteFoodpandaUrl
+    ?? routingResult?.direct_url
+    ?? null;
+
+  const CRAWL_LABELS = {
+    ssr_next_data:       { badge: "LIVE CRAWL ✓",   color: "#22d3ee"  },
+    html_regex_strict:   { badge: "HTML PARSED ✓",   color: "#22d3ee"  },
+    html_regex_loose:    { badge: "REGEX MATCH ✓",   color: "#a78bfa"  },
+    fallback_search_url: { badge: "SEARCH ROUTE",    color: "#94a3b8"  },
+    unknown:             { badge: "CRAWL ✓",         color: "#22d3ee"  },
+  };
+  const crawlLabel = crawlMethod ? CRAWL_LABELS[crawlMethod] ?? CRAWL_LABELS.unknown : null;
 
   // ─── CSS ──────────────────────────────────────────────────────────────────────
   const CSS = `
@@ -570,11 +607,16 @@ export default function DesiFeeKiller() {
                           </div>
                         )}
                       </div>
-                      {isKnownVendor && (
-                        <span className="fk-mono" style={{ fontSize: 8, fontWeight: 700, color: "#34d399", background: "rgba(34,197,94,.05)", border: "1px solid rgba(34,197,94,.18)", borderRadius: 5, padding: "3px 8px", flexShrink: 0, letterSpacing: ".1em", whiteSpace: "nowrap" }}>
-                          DIRECT SLUG ✓
+                      {/* Discovery method badge — crawler result takes priority over static slug */}
+                      {crawlLabel ? (
+                        <span className="fk-mono" style={{ fontSize: 8, fontWeight: 700, color: crawlLabel.color, background: `${crawlLabel.color}0d`, border: `1px solid ${crawlLabel.color}30`, borderRadius: 5, padding: "3px 9px", flexShrink: 0, letterSpacing: ".1em", whiteSpace: "nowrap" }}>
+                          {crawlLabel.badge}
                         </span>
-                      )}
+                      ) : isKnownVendor ? (
+                        <span className="fk-mono" style={{ fontSize: 8, fontWeight: 700, color: "#34d399", background: "rgba(34,197,94,.05)", border: "1px solid rgba(34,197,94,.18)", borderRadius: 5, padding: "3px 8px", flexShrink: 0, letterSpacing: ".1em", whiteSpace: "nowrap" }}>
+                          STATIC SLUG ✓
+                        </span>
+                      ) : null}
                     </div>
                   </div>
 
@@ -628,9 +670,13 @@ export default function DesiFeeKiller() {
                       <a href={finalUrl} target="_blank" rel="noopener noreferrer" className="fk-cta">
                         <div>
                           <p className="fk-mono" style={{ fontSize: 8, color: "rgba(6,182,212,.4)", letterSpacing: ".13em", textTransform: "uppercase", marginBottom: 4 }}>
-                            {isKnownVendor
-                              ? `// DIRECT VENDOR SLUG · ${platform.toUpperCase()} NATIVE`
-                              : `// CITY-SCOPED ${platform.toUpperCase()} SEARCH`}
+                            {isLiveCrawled
+                              ? `// LIVE CRAWL DISCOVERY · ${platform.toUpperCase()} NATIVE`
+                              : isSearchFallback
+                              ? `// CITY-SCOPED ${platform.toUpperCase()} SEARCH`
+                              : isKnownVendor
+                              ? `// STATIC SLUG · ${platform.toUpperCase()} NATIVE`
+                              : `// ${platform.toUpperCase()} DIRECT CHANNEL`}
                           </p>
                           <p style={{ fontSize: 12.5, fontWeight: 700, color: "#e2e8f0", lineHeight: 1.35 }}>
                             {finalUrl.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
