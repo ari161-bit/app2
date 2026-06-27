@@ -404,21 +404,6 @@ export default function DesiFeeKiller() {
               </p>
             </div>
 
-            {/* ── Account nudge ── */}
-            <div className="fk-pop" style={{ borderRadius:18, padding:"20px 22px", animationDelay:".12s",
-              background:"rgba(99,102,241,.06)", border:"1px solid rgba(99,102,241,.18)",
-              display:"flex", alignItems:"center", gap:16 }}>
-              <div style={{ width:44, height:44, borderRadius:13, background:"linear-gradient(135deg,#6366f1,#a855f7)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>✦</div>
-              <div style={{ flex:1 }}>
-                <p style={{ fontSize:14, fontWeight:700, color:"#f1f5f9", marginBottom:2 }}>Save your routing history</p>
-                <p style={{ fontSize:12, color:"rgba(100,116,139,.55)" }}>Free account · Apex OS unified login</p>
-              </div>
-              <a href="/login" className="fk-btn"
-                style={{ padding:"10px 18px", fontSize:12, fontWeight:700, color:"#fff", background:"linear-gradient(135deg,#6366f1,#a855f7)", borderRadius:12, textDecoration:"none", flexShrink:0 }}>
-                Sign up →
-              </a>
-            </div>
-
             {/* ── Try again ── */}
             <button className="fk-btn fk-pop" onClick={() => { setRoutingResult(null); setLogLines([]); }}
               style={{ width:"100%", padding:"15px", fontSize:13, fontWeight:700, color:"rgba(100,116,139,.6)",
